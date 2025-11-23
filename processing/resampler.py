@@ -8,20 +8,20 @@ class DataResampler:
     """数据重采样器"""
     
     def __init__(self):
-        self.numeric_columns = ['CO2_dry', 'CH4_dry']
+        self.numeric_columns = ['CO2_dry', 'CH4_dry', 'H2O']
     
-    def filter_zero_values(self, df: pd.DataFrame, 
-                          co2_threshold: float = 0.1, 
-                          ch4_threshold: float = 0.1) -> pd.DataFrame:
-        """过滤掉CO2和CH4的零值或接近零的值"""
+    def filter_zero_values(self, df: pd.DataFrame) -> pd.DataFrame:  # 移除阈值参数
+        """过滤掉CO2、CH4和H2O的零值"""
         if df.empty:
             return df
         
         condition = True
         if 'CO2_dry' in df.columns:
-            condition = condition & (df['CO2_dry'].fillna(0) > co2_threshold)
+            condition = condition & (df['CO2_dry'] != 0)
         if 'CH4_dry' in df.columns:
-            condition = condition & (df['CH4_dry'].fillna(0) > ch4_threshold)
+            condition = condition & (df['CH4_dry'] != 0)
+        if 'H2O' in df.columns:
+            condition = condition & (df['H2O'] != 0)
         
         return df[condition].copy()
     
@@ -67,8 +67,7 @@ class DataResampler:
     
     def process_data(self, df: pd.DataFrame, time_window: Optional[str], 
                     agg_method: str, display_tz: pytz.timezone, 
-                    filter_zeros: bool = True, co2_threshold: float = 0.1, 
-                    ch4_threshold: float = 0.1) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                    filter_zeros: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:  # 移除阈值参数
         """完整的数据处理流程"""
         original_count = len(df)
         
@@ -79,8 +78,8 @@ class DataResampler:
             df['DATETIME_DISPLAY'] = df.index
         
         # 应用零值过滤
-        if filter_zeros and ('CO2_dry' in df.columns or 'CH4_dry' in df.columns):
-            df = self.filter_zero_values(df, co2_threshold, ch4_threshold)
+        if filter_zeros and any(col in df.columns for col in ['CO2_dry', 'CH4_dry', 'H2O']):
+            df = self.filter_zero_values(df)  # 移除阈值参数
             filtered_count = len(df)
             st.info(f"数据过滤: {original_count} -> {filtered_count} 条记录")
         else:

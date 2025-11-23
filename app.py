@@ -18,7 +18,7 @@ def main():
     st.markdown("---")
     
     # 设置侧边栏
-    config = setup_sidebar()  # 现在返回的是字典
+    config = setup_sidebar()
     
     # 数据加载
     data_loader = DataLoader(config['data_root_path'])
@@ -49,9 +49,7 @@ def main():
         time_window=config['selected_time_window'],
         agg_method=config['selected_agg_method'],
         display_tz=config['selected_timezone'],
-        filter_zeros=config['filter_zeros'],
-        co2_threshold=config['co2_threshold'],
-        ch4_threshold=config['ch4_threshold']
+        filter_zeros=config['filter_zeros']
     )
     
     if processed_df.empty:
@@ -66,7 +64,8 @@ def main():
         time_window=config['selected_time_window_key'],
         agg_method=config['selected_agg_method'],
         co2_range=config['co2_range'],
-        ch4_range=config['ch4_range']
+        ch4_range=config['ch4_range'],
+        h2o_range=config['h2o_range']
     )
     
     # 显示数据概览
@@ -76,35 +75,45 @@ def main():
     col2.metric("数据时间范围", 
                f"{processed_df['DATETIME_DISPLAY'].min()} 至 {processed_df['DATETIME_DISPLAY'].max()}" 
                if 'DATETIME_DISPLAY' in processed_df.columns else "N/A")
-    col3.metric("可用气体数据", 
-               f"CO2_dry: {processed_df['CO2_dry'].count()}, CH4_dry: {processed_df['CH4_dry'].count()}" 
-               if 'CO2_dry' in processed_df.columns and 'CH4_dry' in processed_df.columns else "N/A")
+    # 更新气体数据统计显示
+    available_gases = []
+    if 'CO2_dry' in processed_df.columns:
+        available_gases.append(f"CO2_dry: {processed_df['CO2_dry'].count()}")
+    if 'CH4_dry' in processed_df.columns:
+        available_gases.append(f"CH4_dry: {processed_df['CH4_dry'].count()}")
+    if 'H2O' in processed_df.columns:
+        available_gases.append(f"H2O: {processed_df['H2O'].count()}")
+    col3.metric("可用气体数据", ", ".join(available_gases) if available_gases else "N/A")
     
     # 显示数据预览
     st.subheader("数据预览")
     st.dataframe(processed_df.head(10))
     
     # 绘制图表
-    if 'CO2_dry' in processed_df.columns and 'CH4_dry' in processed_df.columns:
+    # 检查是否包含气体数据
+    has_gas_data = any(col in processed_df.columns for col in ['CO2_dry', 'CH4_dry', 'H2O'])
+    if has_gas_data:
         st.plotly_chart(fig, use_container_width=True)
         
-        # 统计信息
+        # 统计信息 - 添加 H2O 统计
         st.subheader("统计信息")
-        col1, col2 = st.columns(2)
         
-        if 'CO2_dry' in processed_df.columns:
-            with col1:
-                st.write("**CO2_dry 统计**")
-                co2_stats = processed_df['CO2_dry'].describe()
-                st.write(co2_stats)
+        # 创建多列显示统计信息
+        gas_cols = [col for col in ['CO2_dry', 'CH4_dry', 'H2O'] if col in processed_df.columns]
+        if len(gas_cols) == 1:
+            cols = [st.container()]
+        elif len(gas_cols) == 2:
+            cols = st.columns(2)
+        else:  # 3个或更多
+            cols = st.columns(3)
         
-        if 'CH4_dry' in processed_df.columns:
-            with col2:
-                st.write("**CH4_dry 统计**")
-                ch4_stats = processed_df['CH4_dry'].describe()
-                st.write(ch4_stats)
+        for i, gas_col in enumerate(gas_cols):
+            with cols[i % len(cols)]:
+                st.write(f"**{gas_col} 统计**")
+                gas_stats = processed_df[gas_col].describe()
+                st.write(gas_stats)
     else:
-        st.warning("数据中不包含CO2_dry和CH4_dry列")
+        st.warning("数据中不包含气体浓度列")
         st.write("可用列:", list(processed_df.columns))
 
 if __name__ == "__main__":

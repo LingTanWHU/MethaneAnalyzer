@@ -10,7 +10,7 @@ class DataLoader:
     
     def __init__(self, data_root_path: str):
         self.data_root_path = data_root_path
-        self.numeric_columns = ['CO2_dry', 'CH4_dry']
+        self.numeric_columns = ['CO2_dry', 'CH4_dry', 'H2O']  # 添加 H2O
     
     def load_data_file(self, file_path: str) -> Optional[pd.DataFrame]:
         """加载单个.dat文件"""
@@ -45,7 +45,7 @@ class DataLoader:
             
             df = pd.DataFrame(data_lines, columns=headers)
             
-            # 转换数值列
+            # 转换数值列 - 添加 H2O
             for col in self.numeric_columns:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -116,6 +116,7 @@ class DataLoader:
                     all_data.append(df)
         
         if not all_data:
+            st.error("没有加载到任何有效数据")
             return pd.DataFrame()
         
         return pd.concat(all_data, ignore_index=True)

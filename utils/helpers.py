@@ -30,13 +30,17 @@ def setup_sidebar():
             if os.path.isdir(item_path) and item.isdigit():
                 years.append(int(item))
     
-    # 年月日筛选
-    selected_year = st.sidebar.selectbox(
-        "选择年份:", 
-        options=sorted(years) if years else [None], 
-        index=len(years)-1 if years else None
-    )
+    # 年月日筛选 - 使用三列布局
+    col1, col2, col3 = st.sidebar.columns([1, 1, 1])
     
+    with col1:
+        selected_year = st.selectbox(
+            "选择年份:", 
+            options=sorted(years) if years else [None], 
+            index=len(years)-1 if years else None
+        )
+    
+    # 获取月份
     months = []
     if selected_year:
         year_path = os.path.join(config.DATA_ROOT_PATH, str(selected_year).zfill(4))
@@ -46,12 +50,14 @@ def setup_sidebar():
                 if os.path.isdir(item_path) and item.isdigit():
                     months.append(int(item))
     
-    selected_month = st.sidebar.selectbox(
-        "选择月份:", 
-        options=sorted(months) if months else [None], 
-        index=len(months)-1 if months else None
-    )
+    with col2:
+        selected_month = st.selectbox(
+            "选择月份:", 
+            options=sorted(months) if months else [None], 
+            index=len(months)-1 if months else None
+        )
     
+    # 获取日期
     days = []
     if selected_year and selected_month:
         month_path = os.path.join(config.DATA_ROOT_PATH, str(selected_year).zfill(4), str(selected_month).zfill(2))
@@ -61,17 +67,16 @@ def setup_sidebar():
                 if os.path.isdir(item_path) and item.isdigit():
                     days.append(int(item))
     
-    selected_day = st.sidebar.selectbox(
-        "选择日期:", 
-        options=sorted(days) if days else [None], 
-        index=len(days)-1 if days else None
-    )
+    with col3:
+        selected_day = st.selectbox(
+            "选择日期:", 
+            options=sorted(days) if days else [None], 
+            index=len(days)-1 if days else None
+        )
     
-    # 数据过滤设置
+    # 数据过滤设置 - 只保留过滤零值的选项
     st.sidebar.header("数据过滤设置")
-    co2_threshold = st.sidebar.slider("CO2_dry 最小阈值", 0.0, 10.0, 0.1, 0.1)
-    ch4_threshold = st.sidebar.slider("CH4_dry 最小阈值", 0.0, 10.0, 0.1, 0.1)
-    filter_zeros = st.sidebar.checkbox("过滤零值/接近零值", value=True)
+    filter_zeros = st.sidebar.checkbox("过滤零值", value=True)
     
     # 时区设置
     st.sidebar.header("时区设置")
@@ -102,7 +107,7 @@ def setup_sidebar():
 
     # 图形设置
     st.sidebar.header("图形设置")
-    # 为Y轴范围添加选项，None表示自动调整
+    # CO2
     use_custom_co2_range = st.sidebar.checkbox("自定义CO2 Y轴范围", value=False)
     if use_custom_co2_range:
         co2_range = st.sidebar.slider(
@@ -111,8 +116,9 @@ def setup_sidebar():
             (0.0, 1000.0)
         )
     else:
-        co2_range = None  # 表示自动调整
+        co2_range = None
         
+    # CH4
     use_custom_ch4_range = st.sidebar.checkbox("自定义CH4 Y轴范围", value=False)
     if use_custom_ch4_range:
         ch4_range = st.sidebar.slider(
@@ -121,7 +127,18 @@ def setup_sidebar():
             (0.0, 10.0)
         )
     else:
-        ch4_range = None  # 表示自动调整
+        ch4_range = None
+        
+    # H2O
+    use_custom_h2o_range = st.sidebar.checkbox("自定义H2O Y轴范围", value=False)
+    if use_custom_h2o_range:
+        h2o_range = st.sidebar.slider(
+            "H2O Y轴范围",
+            0.0, 100.0,
+            (0.0, 100.0)
+        )
+    else:
+        h2o_range = None
 
     # 返回配置字典
     return {
@@ -129,13 +146,12 @@ def setup_sidebar():
         'selected_year': selected_year,
         'selected_month': selected_month,
         'selected_day': selected_day,
-        'co2_threshold': co2_threshold,
-        'ch4_threshold': ch4_threshold,
         'filter_zeros': filter_zeros,
         'selected_timezone': selected_timezone,
         'selected_time_window_key': selected_time_window_key,
         'selected_time_window': selected_time_window,
         'selected_agg_method': selected_agg_method,
         'co2_range': co2_range,
-        'ch4_range': ch4_range
+        'ch4_range': ch4_range,
+        'h2o_range': h2o_range
     }

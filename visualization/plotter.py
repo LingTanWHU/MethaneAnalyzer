@@ -9,20 +9,21 @@ class DataPlotter:
     def create_plots(self, df: pd.DataFrame, std_df: pd.DataFrame, 
                     time_window: str, agg_method: str, 
                     co2_range: Optional[Tuple[float, float]] = None,
-                    ch4_range: Optional[Tuple[float, float]] = None) -> go.Figure:
-        """创建CO2和CH4的子图"""
+                    ch4_range: Optional[Tuple[float, float]] = None,
+                    h2o_range: Optional[Tuple[float, float]] = None) -> go.Figure:
+        """创建CO2、CH4和H2O的子图"""
         fig = make_subplots(
-            rows=2, cols=1,
-            subplot_titles=("CO₂ 干基浓度 (ppm)", "CH₄ 干基浓度 (ppm)"),
+            rows=3, cols=1,  # 改为3行
+            # subplot_titles=("CO₂ 干基浓度 (ppm)", "CH₄ 干基浓度 (ppm)", "H₂O 浓度 (ppm)"),  # 添加标题
             shared_xaxes=True,
-            vertical_spacing=0.1
+            vertical_spacing=0.08
         )
 
         # 准备数据：保留 NaN，用于识别断开段
         plot_df = df.copy()
         if not std_df.empty and time_window != "原始 (无平均)":
-            # 合并标准差数据
-            plot_df = plot_df.merge(std_df[['DATETIME_DISPLAY'] + ['CO2_dry', 'CH4_dry']], 
+            # 合并标准差数据 - 添加 H2O
+            plot_df = plot_df.merge(std_df[['DATETIME_DISPLAY'] + ['CO2_dry', 'CH4_dry', 'H2O']], 
                                    on='DATETIME_DISPLAY', suffixes=('', '_std'), how='left')
 
         # 绘制 CO2 子图
@@ -31,10 +32,13 @@ class DataPlotter:
         # 绘制 CH4 子图
         self._add_gas_trace(fig, plot_df, 'CH4_dry', 'red', 2, time_window)
 
+        # 绘制 H2O 子图
+        self._add_gas_trace(fig, plot_df, 'H2O', 'green', 3, time_window)  # 添加 H2O
+
         # 更新布局
         fig.update_layout(
-            title=f'CO2和CH4干基浓度时间序列 (时间窗口: {time_window.replace("原始 (无平均)", "无")}, 聚合方法: {"平均值" if agg_method == "mean" else "中位数"})',
-            height=800,
+            title=f'气体浓度时间序列 (时间窗口: {time_window.replace("原始 (无平均)", "无")}, 聚合方法: {"平均值" if agg_method == "mean" else "中位数"})',
+            height=1000,  # 增加高度
             width=1000,
             showlegend=True,
             legend=dict(
@@ -50,24 +54,34 @@ class DataPlotter:
         # 设置 Y 轴标题
         fig.update_yaxes(title_text="CO2_dry (ppm)", row=1, col=1)
         fig.update_yaxes(title_text="CH4_dry (ppm)", row=2, col=1)
-        fig.update_xaxes(title_text="时间", row=2, col=1)
+        fig.update_yaxes(title_text="H2O (ppm)", row=3, col=1)  # 添加 H2O Y轴标题
+        fig.update_xaxes(title_text="时间", row=3, col=1)
 
         # 根据数据自动设置 Y 轴范围，或使用用户指定的范围
         if 'CO2_dry' in plot_df.columns and plot_df['CO2_dry'].notna().any():
-            if co2_range and co2_range != (0.0, 1000.0):  # 如果用户设置了非默认范围
+            if co2_range is not None and co2_range != (0.0, 1000.0):
                 fig.update_yaxes(range=co2_range, row=1, col=1)
-            else:  # 自动调整范围
+            else:
                 co2_min, co2_max = float(plot_df['CO2_dry'].min()), float(plot_df['CO2_dry'].max())
-                margin = (co2_max - co2_min) * 0.05 if co2_max != co2_min else 50  # 添加5%的边距
+                margin = (co2_max - co2_min) * 0.05 if co2_max != co2_min else 50
                 fig.update_yaxes(range=[co2_min - margin, co2_max + margin], row=1, col=1)
 
         if 'CH4_dry' in plot_df.columns and plot_df['CH4_dry'].notna().any():
-            if ch4_range and ch4_range != (0.0, 10.0):  # 如果用户设置了非默认范围
+            if ch4_range is not None and ch4_range != (0.0, 10.0):
                 fig.update_yaxes(range=ch4_range, row=2, col=1)
-            else:  # 自动调整范围
+            else:
                 ch4_min, ch4_max = float(plot_df['CH4_dry'].min()), float(plot_df['CH4_dry'].max())
-                margin = (ch4_max - ch4_min) * 0.05 if ch4_max != ch4_min else 0.1  # 添加5%的边距
+                margin = (ch4_max - ch4_min) * 0.05 if ch4_max != ch4_min else 0.1
                 fig.update_yaxes(range=[ch4_min - margin, ch4_max + margin], row=2, col=1)
+
+        # 添加 H2O Y轴范围设置
+        if 'H2O' in plot_df.columns and plot_df['H2O'].notna().any():
+            if h2o_range is not None and h2o_range != (0.0, 100.0):
+                fig.update_yaxes(range=h2o_range, row=3, col=1)
+            else:
+                h2o_min, h2o_max = float(plot_df['H2O'].min()), float(plot_df['H2O'].max())
+                margin = (h2o_max - h2o_min) * 0.05 if h2o_max != h2o_min else 1.0
+                fig.update_yaxes(range=[h2o_min - margin, h2o_max + margin], row=3, col=1)
 
         return fig
     
@@ -138,6 +152,7 @@ class DataPlotter:
         """将颜色名转换为RGBA值"""
         color_map = {
             'blue': '0,0,255',
-            'red': '255,0,0'
+            'red': '255,0,0',
+            'green': '0,255,0'  # 添加绿色用于 H2O
         }
         return color_map.get(color, '0,0,0')
