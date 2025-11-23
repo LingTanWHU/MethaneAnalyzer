@@ -1,9 +1,10 @@
 import streamlit as st
 import os
+import glob  # 添加这个导入
 import pytz
 from datetime import datetime, time, timedelta, date
 from config.settings import (
-    TIME_WINDOW_OPTIONS, AGG_METHOD_OPTIONS, TIMEZONE_OPTIONS,
+    TIME_WINDOW_OPTIONS, AGG_METHOD_OPTIONS, TIMEZONE_OPTIONS, DATA_SOURCE_OPTIONS,
     DEFAULT_TIME_WINDOW_INDEX, DEFAULT_AGG_METHOD_INDEX, DEFAULT_TIMEZONE_INDEX,
     AppConfig
 )
@@ -16,8 +17,8 @@ def setup_page_config():
         initial_sidebar_state="expanded"
     )
 
-def scan_available_dates(data_root_path: str, start_year: int = None, end_year: int = None) -> set:
-    """扫描数据目录，获取所有有数据的日期"""
+def scan_available_dates_picarro(data_root_path: str, start_year: int = None, end_year: int = None) -> set:
+    """扫描 Picarro 数据目录，获取所有有数据的日期"""
     available_dates = set()
     
     # 确定年份范围
@@ -49,6 +50,41 @@ def scan_available_dates(data_root_path: str, start_year: int = None, end_year: 
     
     return available_dates
 
+def scan_available_dates_pico(data_root_path: str) -> set:
+    """扫描 Pico 数据目录，获取所有有数据的日期"""
+    available_dates = set()
+    
+    # 查找所有匹配的 .txt 文件
+    all_txt_files = glob.glob(os.path.join(data_root_path, "*.txt"))
+    
+    for txt_file in all_txt_files:
+        filename = os.path.basename(txt_file)
+        # 排除不需要的文件
+        if ('Eng.txt' in filename or 
+            'spectralite.txt' in filename or 
+            'config.txt' in filename):
+            continue
+        
+        # 检查文件名是否符合 Pico 数据格式: Pico101244_251106_185816.txt
+        if filename.startswith('Pico') and filename.endswith('.txt'):
+            try:
+                # 从文件名提取时间信息: Pico101244_251106_185816.txt
+                # 提取日期部分: 251106 -> 2025-11-06
+                name_part = filename.replace('Pico', '').replace('.txt', '')
+                if '_' in name_part:
+                    date_part = name_part.split('_')[1]  # 251106
+                    year = int('20' + date_part[:2])
+                    month = int(date_part[2:4])
+                    day = int(date_part[4:6])
+                    
+                    file_date = datetime(year, month, day).date()
+                    available_dates.add(file_date)
+            except:
+                # 如果解析失败，跳过这个文件
+                continue
+    
+    return available_dates
+
 def display_data_availability(available_dates: set):
     """显示数据可用性表格"""
     if not available_dates:
@@ -72,7 +108,7 @@ def display_data_availability(available_dates: set):
     for i, check_date in enumerate(last_30_days):
         # 计算相对于第一个日期的偏移量
         offset_days = (check_date - first_date).days
-        # 计算星期几
+        # 计算是星期几
         day_of_week = (first_weekday + offset_days) % 7  # 0=Monday, 6=Sunday
         # 计算是第几周
         week_num = (first_weekday + offset_days) // 7
@@ -105,23 +141,63 @@ def setup_sidebar():
     config = AppConfig()
     
     st.sidebar.header("数据选择")
-    st.sidebar.info(f"数据根路径: {config.DATA_ROOT_PATH}")
     
-    # 扫描并显示可用数据日期
-    if os.path.exists(config.DATA_ROOT_PATH):
-        with st.spinner("正在扫描数据目录..."):
-            available_dates = scan_available_dates(config.DATA_ROOT_PATH)
+    # 数据源切换
+    data_source_key = st.sidebar.selectbox(
+        "选择数据源",
+        options=list(DATA_SOURCE_OPTIONS.keys()),
+        index=0  # 默认为 Picarro
+    )
+    data_source = DATA_SOURCE_OPTIONS[data_source_key]
+    
+    if data_source == 'picarro':
+        data_root_path = config.PICARRO_DATA_ROOT_PATH
+        st.sidebar.info(f"数据根路径: {data_root_path}")
         
-        # 显示数据可用性
-        display_data_availability(available_dates)
-        
-        # 找到最近有数据的日期
-        if available_dates:
-            latest_data_date = max(available_dates)  # 最近的有数据日期
+        # 扫描并显示 Picarro 可用数据日期
+        if os.path.exists(data_root_path):
+            with st.spinner("正在扫描数据目录..."):
+                available_dates = scan_available_dates_picarro(data_root_path)
+            
+            # 显示数据可用性
+            display_data_availability(available_dates)
+            
+            # 找到最近有数据的日期
+            if available_dates:
+                latest_data_date = max(available_dates)  # 最近的有数据日期
+            else:
+                latest_data_date = datetime.now().date() - timedelta(days=1)  # 如果没有数据，使用前一天
         else:
-            latest_data_date = datetime.now().date() - timedelta(days=1)  # 如果没有数据，使用前一天
-    else:
-        latest_data_date = datetime.now().date() - timedelta(days=1)
+            latest_data_date = datetime.now().date() - timedelta(days=1)
+    
+    elif data_source == 'pico':
+        data_root_path = config.PICO_DATA_ROOT_PATH
+        st.sidebar.info(f"数据根路径: {data_root_path}")
+        
+        # 扫描并显示 Pico 可用数据日期
+        if os.path.exists(data_root_path):
+            with st.spinner("正在扫描数据目录..."):
+                available_dates = scan_available_dates_pico(data_root_path)
+            
+            # 显示数据可用性
+            display_data_availability(available_dates)
+            
+            # 找到最近有数据的日期
+            if available_dates:
+                latest_data_date = max(available_dates)  # 最近的有数据日期
+            else:
+                latest_data_date = datetime.now().date() - timedelta(days=1)  # 如果没有数据，使用前一天
+        else:
+            latest_data_date = datetime.now().date() - timedelta(days=1)
+    
+    # 时区设置 - 移到时间设置之前
+    st.sidebar.header("时区设置")
+    selected_tz_key = st.sidebar.selectbox(
+        "选择显示时区",
+        options=list(TIMEZONE_OPTIONS.keys()),
+        index=DEFAULT_TIMEZONE_INDEX
+    )
+    selected_timezone = pytz.timezone(TIMEZONE_OPTIONS[selected_tz_key])
     
     # 时间范围设置 - 使用日期时间选择器
     st.sidebar.header("时间范围设置")
@@ -169,18 +245,9 @@ def setup_sidebar():
         st.sidebar.error("起始时间不能晚于终止时间")
         return None
 
-    # 数据过滤设置 - 只保留过滤零值的选项
+    # 数据过滤设置 - 过滤非正数，默认开启
     st.sidebar.header("数据过滤设置")
-    filter_zeros = st.sidebar.checkbox("过滤零值", value=False)
-    
-    # 时区设置
-    st.sidebar.header("时区设置")
-    selected_tz_key = st.sidebar.selectbox(
-        "选择显示时区",
-        options=list(TIMEZONE_OPTIONS.keys()),
-        index=DEFAULT_TIMEZONE_INDEX
-    )
-    selected_timezone = pytz.timezone(TIMEZONE_OPTIONS[selected_tz_key])
+    filter_non_positive = st.sidebar.checkbox("过滤非正数 (≤ 0)", value=True)  # 默认开启
 
     # 时间平均设置
     st.sidebar.header("时间平均设置")
@@ -203,7 +270,7 @@ def setup_sidebar():
     # 图形设置
     st.sidebar.header("图形设置")
     # CO2
-    use_custom_co2_range = st.sidebar.checkbox("自定义CO2 Y轴范围", value=False)
+    use_custom_co2_range = st.sidebar.checkbox("自定义CO2 Y轴范围", value=False) if data_source == 'picarro' else False
     if use_custom_co2_range:
         co2_range = st.sidebar.slider(
             "CO2 Y轴范围",
@@ -234,13 +301,25 @@ def setup_sidebar():
         )
     else:
         h2o_range = None
+        
+    # C2H6 (仅 Pico)
+    use_custom_c2h6_range = st.sidebar.checkbox("自定义C2H6 Y轴范围", value=False) if data_source == 'pico' else False
+    if use_custom_c2h6_range:
+        c2h6_range = st.sidebar.slider(
+            "C2H6 Y轴范围",
+            0.0, 1000.0,
+            (0.0, 1000.0)
+        )
+    else:
+        c2h6_range = None
 
     # 返回配置字典
-    return {
-        'data_root_path': config.DATA_ROOT_PATH,
+    config_dict = {
+        'data_source': data_source,
+        'data_root_path': data_root_path,
         'start_datetime': start_datetime,
         'end_datetime': end_datetime,
-        'filter_zeros': filter_zeros,
+        'filter_non_positive': filter_non_positive,  # 修改参数名
         'selected_timezone': selected_timezone,
         'selected_time_window_key': selected_time_window_key,
         'selected_time_window': selected_time_window,
@@ -249,3 +328,8 @@ def setup_sidebar():
         'ch4_range': ch4_range,
         'h2o_range': h2o_range
     }
+    
+    if data_source == 'pico':
+        config_dict['c2h6_range'] = c2h6_range
+    
+    return config_dict

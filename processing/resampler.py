@@ -8,20 +8,29 @@ class DataResampler:
     """数据重采样器"""
     
     def __init__(self):
-        self.numeric_columns = ['CO2_dry', 'CH4_dry', 'H2O']
+        # 根据数据源动态设置列名
+        pass
     
-    def filter_zero_values(self, df: pd.DataFrame) -> pd.DataFrame:
-        """过滤掉CO2、CH4和H2O的零值"""
+    def filter_non_positive_values(self, df: pd.DataFrame, data_source: str = 'picarro') -> pd.DataFrame:
+        """过滤掉气体的非正数（<= 0）"""
         if df.empty:
             return df
         
         condition = True
-        if 'CO2_dry' in df.columns:
-            condition = condition & (df['CO2_dry'] != 0)
-        if 'CH4_dry' in df.columns:
-            condition = condition & (df['CH4_dry'] != 0)
-        if 'H2O' in df.columns:
-            condition = condition & (df['H2O'] != 0)
+        if data_source == 'picarro':
+            if 'CO2_dry' in df.columns:
+                condition = condition & (df['CO2_dry'] > 0)
+            if 'CH4_dry' in df.columns:
+                condition = condition & (df['CH4_dry'] > 0)
+            if 'H2O' in df.columns:
+                condition = condition & (df['H2O'] > 0)
+        else:  # pico
+            if 'CH4' in df.columns:
+                condition = condition & (df['CH4'] > 0)
+            if 'C2H6' in df.columns:
+                condition = condition & (df['C2H6'] > 0)
+            if 'H2O' in df.columns:
+                condition = condition & (df['H2O'] > 0)
         
         return df[condition].copy()
     
@@ -45,53 +54,51 @@ class DataResampler:
         # 只对数值列进行聚合
         df_numeric = df_with_index[numeric_cols]
         
-        # 重采样对象
-        resampled = df_numeric.resample(time_window)
-        
-        # 根据聚合方法选择函数 - 优化聚合方式
-        if agg_method == 'mean':
-            # 使用更高效的聚合方法
-            df_resampled = resampled.agg(['mean', 'std'])
-            # 分离均值和标准差
-            mean_cols = [col for col in df_resampled.columns if col[1] == 'mean']
-            std_cols = [col for col in df_resampled.columns if col[1] == 'std']
-            
-            df_mean = df_resampled[mean_cols]
-            df_std = df_resampled[std_cols]
-            
-            # 重命名列
-            df_mean.columns = [col[0] for col in mean_cols]
-            df_std.columns = [col[0] for col in std_cols]
-        elif agg_method == 'median':
-            df_mean = resampled.median()
-            df_std = resampled.std()
+        # 将旧的时间频率别名转换为新格式
+        if time_window:
+            # 将 'T' 替换为 'min'
+            corrected_time_window = time_window.replace('T', 'min')
         else:
-            df_mean = resampled.mean()
-            df_std = resampled.std()
+            corrected_time_window = time_window
+        
+        # 重采样对象
+        resampled = df_numeric.resample(corrected_time_window)
+        
+        # 根据聚合方法选择函数
+        if agg_method == 'mean':
+            df_resampled = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+        elif agg_method == 'median':
+            df_resampled = resampled.apply(lambda x: x.median() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+        else:
+            df_resampled = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
         
         # 将时间列从索引中恢复
-        df_mean = df_mean.reset_index()
+        df_resampled = df_resampled.reset_index()
         df_std = df_std.reset_index()
         
-        return df_mean, df_std
+        return df_resampled, df_std
     
     def process_data(self, df: pd.DataFrame, time_window: Optional[str], 
                     agg_method: str, display_tz: pytz.timezone, 
-                    filter_zeros: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                    filter_non_positive: bool = True, data_source: str = 'picarro') -> Tuple[pd.DataFrame, pd.DataFrame]:
         """完整的数据处理流程"""
         original_count = len(df)
         
         # 转换时区用于显示
         if 'DATETIME' in df.columns:
+            # 将UTC时间转换为用户选择的时区用于显示
             df['DATETIME_DISPLAY'] = df['DATETIME'].dt.tz_convert(display_tz)
         else:
             df['DATETIME_DISPLAY'] = df.index
         
-        # 应用零值过滤
-        if filter_zeros and any(col in df.columns for col in ['CO2_dry', 'CH4_dry', 'H2O']):
-            df = self.filter_zero_values(df)
+        # 应用非正数过滤
+        if filter_non_positive:
+            df = self.filter_non_positive_values(df, data_source)
             filtered_count = len(df)
-            st.info(f"数据过滤: {original_count} -> {filtered_count} 条记录")
+            st.info(f"数据过滤 (非正数): {original_count} -> {filtered_count} 条记录")
         else:
             st.info(f"原始数据记录数: {original_count}")
         

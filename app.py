@@ -11,14 +11,14 @@ from visualization.plotter import DataPlotter
 from utils.helpers import setup_sidebar, setup_page_config
 
 @st.cache_data(ttl=300)  # 缓存5分钟
-def load_and_process_data(data_root_path, start_datetime, end_datetime, 
-                         timezone_str, time_window, agg_method, filter_zeros):
+def load_and_process_data(data_source, start_datetime, end_datetime, 
+                         timezone_str, time_window, agg_method, filter_non_positive):
     """缓存数据加载和处理过程"""
     # 将时区字符串转换为时区对象
     selected_timezone = pytz.timezone(timezone_str)
     
     # 数据加载
-    data_loader = DataLoader(data_root_path)
+    data_loader = DataLoader(data_source)
     all_files = data_loader.get_filtered_files(
         start_date=start_datetime,
         end_date=end_datetime,
@@ -46,8 +46,13 @@ def load_and_process_data(data_root_path, start_datetime, end_datetime,
         time_window=time_window,
         agg_method=agg_method,
         display_tz=selected_timezone,
-        filter_zeros=filter_zeros
+        filter_non_positive=filter_non_positive,
+        data_source=data_source  # 传入数据源类型
     )
+    
+    # 对 Picarro 的 H2O 数据进行单位转换：乘以 1e4 (从 % 转换为 ppm)
+    if data_source == 'picarro' and 'H2O' in processed_df.columns:
+        processed_df['H2O'] = processed_df['H2O'] * 1e4
     
     return processed_df, std_df
 
@@ -67,16 +72,16 @@ def main():
     if config is None:
         return
     
-    # 使用缓存加载数据 - 传入时区字符串而不是时区对象
+    # 使用缓存加载数据 - 传入数据源类型而不是路径
     with st.spinner("正在加载和处理数据..."):
         processed_df, std_df = load_and_process_data(
-            config['data_root_path'],
+            config['data_source'],  # 传入数据源类型
             config['start_datetime'],
             config['end_datetime'],
             config['selected_timezone'].zone,  # 传入时区字符串
             config['selected_time_window'],
             config['selected_agg_method'],
-            config['filter_zeros']
+            config['filter_non_positive']  # 修改参数名
         )
     
     if processed_df.empty:
@@ -92,38 +97,10 @@ def main():
         agg_method=config['selected_agg_method'],
         co2_range=config['co2_range'],
         ch4_range=config['ch4_range'],
-        h2o_range=config['h2o_range']
+        h2o_range=config['h2o_range'],
+        c2h6_range=config.get('c2h6_range', None),
+        data_source=config['data_source']  # 传入数据源类型
     )
-    
-    # 显示数据概览
-    st.subheader("数据概览")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(label="总记录数", value=len(processed_df))
-    
-    with col2:
-        if 'DATETIME_DISPLAY' in processed_df.columns:
-            start_time = processed_df['DATETIME_DISPLAY'].min()
-            end_time = processed_df['DATETIME_DISPLAY'].max()
-            # 精简时间显示格式
-            time_range = f"{start_time.strftime('%m-%d %H:%M')} 至 {end_time.strftime('%m-%d %H:%M')}"
-            st.metric(label="时间范围", value=time_range)
-        else:
-            st.metric(label="时间范围", value="N/A")
-    
-    with col3:
-        # 精简气体数据统计显示
-        gas_counts = []
-        if 'CO2_dry' in processed_df.columns:
-            gas_counts.append(f"CO2: {processed_df['CO2_dry'].count()}")
-        if 'CH4_dry' in processed_df.columns:
-            gas_counts.append(f"CH4: {processed_df['CH4_dry'].count()}")
-        if 'H2O' in processed_df.columns:
-            gas_counts.append(f"H2O: {processed_df['H2O'].count()}")
-        
-        gas_summary = ", ".join(gas_counts) if gas_counts else "N/A"
-        st.metric(label="气体数据", value=gas_summary)
     
     # 显示数据预览
     st.subheader("数据预览")
@@ -131,15 +108,23 @@ def main():
     
     # 绘制图表
     # 检查是否包含气体数据
-    has_gas_data = any(col in processed_df.columns for col in ['CO2_dry', 'CH4_dry', 'H2O'])
+    if config['data_source'] == 'picarro':
+        has_gas_data = any(col in processed_df.columns for col in ['CO2_dry', 'CH4_dry', 'H2O'])
+    else:  # pico
+        has_gas_data = any(col in processed_df.columns for col in ['CH4', 'C2H6', 'H2O'])
+    
     if has_gas_data:
         st.plotly_chart(fig, use_container_width=True)
         
-        # 统计信息 - 添加 H2O 统计
+        # 统计信息
         st.subheader("统计信息")
         
         # 创建多列显示统计信息
-        gas_cols = [col for col in ['CO2_dry', 'CH4_dry', 'H2O'] if col in processed_df.columns]
+        if config['data_source'] == 'picarro':
+            gas_cols = [col for col in ['CO2_dry', 'CH4_dry', 'H2O'] if col in processed_df.columns]
+        else:  # pico
+            gas_cols = [col for col in ['CH4', 'C2H6', 'H2O'] if col in processed_df.columns]
+        
         if len(gas_cols) == 1:
             cols = [st.container()]
         elif len(gas_cols) == 2:

@@ -12,40 +12,129 @@ class DataPlotter:
                     time_window: str, agg_method: str, 
                     co2_range: Optional[Tuple[float, float]] = None,
                     ch4_range: Optional[Tuple[float, float]] = None,
-                    h2o_range: Optional[Tuple[float, float]] = None) -> go.Figure:
-        """创建CO2、CH4和H2O的子图"""
-        fig = make_subplots(
-            rows=3, cols=1,  # 改为3行
-            subplot_titles=("CO₂ 干基浓度 (ppm)", "CH₄ 干基浓度 (ppm)", "H₂O 浓度 (ppm)"),  # 添加 H2O 标题
-            shared_xaxes=True,
-            vertical_spacing=0.08
-        )
+                    h2o_range: Optional[Tuple[float, float]] = None,
+                    c2h6_range: Optional[Tuple[float, float]] = None,
+                    data_source: str = 'picarro') -> go.Figure:
+        """创建气体浓度子图，支持 Picarro 和 Pico 数据"""
+        
+        if data_source == 'picarro':
+            # Picarro: CH4, CO2, H2O (修改顺序)
+            fig = make_subplots(
+                rows=3, cols=1,
+                subplot_titles=("CH₄ 干基浓度 (ppm)", "CO₂ 干基浓度 (ppm)", "H₂O 浓度 (ppm)"),
+                shared_xaxes=True,
+                vertical_spacing=0.08
+            )
+            
+            # 合并主数据和标准差数据
+            plot_df = df.copy()
+            if not std_df.empty and time_window != "原始 (无平均)":
+                plot_df = plot_df.merge(std_df[['DATETIME_DISPLAY'] + ['CH4_dry', 'CO2_dry', 'H2O']], 
+                                       on='DATETIME_DISPLAY', suffixes=('', '_std'), how='left')
 
-        # 准备数据：保留 NaN，用于识别断开段
-        plot_df = df.copy()
-        if not std_df.empty and time_window != "原始 (无平均)":
-            # 合并标准差数据 - 添加 H2O
-            plot_df = plot_df.merge(std_df[['DATETIME_DISPLAY'] + ['CO2_dry', 'CH4_dry', 'H2O']], 
-                                   on='DATETIME_DISPLAY', suffixes=('', '_std'), how='left')
+            # 绘制 CH4 子图
+            if 'CH4_dry' in plot_df.columns:
+                self._add_gas_trace(fig, plot_df, 'CH4_dry', 'red', 1, time_window)
+            
+            # 绘制 CO2 子图
+            if 'CO2_dry' in plot_df.columns:
+                self._add_gas_trace(fig, plot_df, 'CO2_dry', 'blue', 2, time_window)
+            
+            # 绘制 H2O 子图
+            if 'H2O' in plot_df.columns:
+                self._add_gas_trace(fig, plot_df, 'H2O', 'green', 3, time_window)
+            
+            # 添加垂直线
+            self._add_vertical_lines(fig, plot_df, 1)  # CH4 子图
+            self._add_vertical_lines(fig, plot_df, 2)  # CO2 子图
+            self._add_vertical_lines(fig, plot_df, 3)  # H2O 子图
+            
+            # 设置 Y 轴范围
+            if 'CH4_dry' in plot_df.columns and plot_df['CH4_dry'].notna().any():
+                if ch4_range is not None and ch4_range != (0.0, 10.0):
+                    fig.update_yaxes(range=ch4_range, row=1, col=1)
+                else:
+                    ch4_min, ch4_max = float(plot_df['CH4_dry'].min()), float(plot_df['CH4_dry'].max())
+                    margin = (ch4_max - ch4_min) * 0.05 if ch4_max != ch4_min else 0.1
+                    fig.update_yaxes(range=[ch4_min - margin, ch4_max + margin], row=1, col=1)
+            
+            if 'CO2_dry' in plot_df.columns and plot_df['CO2_dry'].notna().any():
+                if co2_range is not None and co2_range != (0.0, 1000.0):
+                    fig.update_yaxes(range=co2_range, row=2, col=1)
+                else:
+                    co2_min, co2_max = float(plot_df['CO2_dry'].min()), float(plot_df['CO2_dry'].max())
+                    margin = (co2_max - co2_min) * 0.05 if co2_max != co2_min else 50
+                    fig.update_yaxes(range=[co2_min - margin, co2_max + margin], row=2, col=1)
+            
+            if 'H2O' in plot_df.columns and plot_df['H2O'].notna().any():
+                if h2o_range is not None and h2o_range != (0.0, 100.0):
+                    fig.update_yaxes(range=h2o_range, row=3, col=1)
+                else:
+                    h2o_min, h2o_max = float(plot_df['H2O'].min()), float(plot_df['H2O'].max())
+                    margin = (h2o_max - h2o_min) * 0.05 if h2o_max != h2o_min else 1.0
+                    fig.update_yaxes(range=[h2o_min - margin, h2o_max + margin], row=3, col=1)
+        
+        elif data_source == 'pico':
+            # Pico: CH4, C2H6, H2O (保持原顺序)
+            fig = make_subplots(
+                rows=3, cols=1,
+                subplot_titles=("CH₄ 浓度 (ppm)", "C₂H₆ 浓度 (ppb)", "H₂O 浓度 (ppm)"),
+                shared_xaxes=True,
+                vertical_spacing=0.08
+            )
+            
+            # 合并主数据和标准差数据
+            plot_df = df.copy()
+            if not std_df.empty and time_window != "原始 (无平均)":
+                plot_df = plot_df.merge(std_df[['DATETIME_DISPLAY'] + ['CH4', 'C2H6', 'H2O']], 
+                                       on='DATETIME_DISPLAY', suffixes=('', '_std'), how='left')
 
-        # 绘制 CO2 子图
-        self._add_gas_trace(fig, plot_df, 'CO2_dry', 'blue', 1, time_window)
-
-        # 绘制 CH4 子图
-        self._add_gas_trace(fig, plot_df, 'CH4_dry', 'red', 2, time_window)
-
-        # 绘制 H2O 子图
-        self._add_gas_trace(fig, plot_df, 'H2O', 'green', 3, time_window)  # 添加 H2O
-
-        # 添加每天的垂直线
-        self._add_vertical_lines(fig, plot_df, 1)  # CO2 子图
-        self._add_vertical_lines(fig, plot_df, 2)  # CH4 子图
-        self._add_vertical_lines(fig, plot_df, 3)  # H2O 子图
-
+            # 绘制 CH4 子图
+            if 'CH4' in plot_df.columns:
+                self._add_gas_trace(fig, plot_df, 'CH4', 'red', 1, time_window)
+            
+            # 绘制 C2H6 子图
+            if 'C2H6' in plot_df.columns:
+                self._add_gas_trace(fig, plot_df, 'C2H6', 'orange', 2, time_window)
+            
+            # 绘制 H2O 子图
+            if 'H2O' in plot_df.columns:
+                self._add_gas_trace(fig, plot_df, 'H2O', 'green', 3, time_window)
+            
+            # 添加垂直线
+            self._add_vertical_lines(fig, plot_df, 1)  # CH4 子图
+            self._add_vertical_lines(fig, plot_df, 2)  # C2H6 子图
+            self._add_vertical_lines(fig, plot_df, 3)  # H2O 子图
+            
+            # 设置 Y 轴范围
+            if 'CH4' in plot_df.columns and plot_df['CH4'].notna().any():
+                if ch4_range is not None and ch4_range != (0.0, 10.0):
+                    fig.update_yaxes(range=ch4_range, row=1, col=1)
+                else:
+                    ch4_min, ch4_max = float(plot_df['CH4'].min()), float(plot_df['CH4'].max())
+                    margin = (ch4_max - ch4_min) * 0.05 if ch4_max != ch4_min else 0.1
+                    fig.update_yaxes(range=[ch4_min - margin, ch4_max + margin], row=1, col=1)
+            
+            if 'C2H6' in plot_df.columns and plot_df['C2H6'].notna().any():
+                if c2h6_range is not None and c2h6_range != (0.0, 1000.0):
+                    fig.update_yaxes(range=c2h6_range, row=2, col=1)
+                else:
+                    c2h6_min, c2h6_max = float(plot_df['C2H6'].min()), float(plot_df['C2H6'].max())
+                    margin = (c2h6_max - c2h6_min) * 0.05 if c2h6_max != c2h6_min else 10.0
+                    fig.update_yaxes(range=[c2h6_min - margin, c2h6_max + margin], row=2, col=1)
+            
+            if 'H2O' in plot_df.columns and plot_df['H2O'].notna().any():
+                if h2o_range is not None and h2o_range != (0.0, 100.0):
+                    fig.update_yaxes(range=h2o_range, row=3, col=1)
+                else:
+                    h2o_min, h2o_max = float(plot_df['H2O'].min()), float(plot_df['H2O'].max())
+                    margin = (h2o_max - h2o_min) * 0.05 if h2o_max != h2o_min else 1.0
+                    fig.update_yaxes(range=[h2o_min - margin, h2o_max + margin], row=3, col=1)
+        
         # 更新布局
         fig.update_layout(
-            title=f'气体浓度时间序列 (时间窗口: {time_window.replace("原始 (无平均)", "无")}, 聚合方法: {"平均值" if agg_method == "mean" else "中位数"})',
-            height=1000,  # 增加高度
+            title=f'{data_source.upper()} 气体浓度时间序列 (时间窗口: {time_window.replace("原始 (无平均)", "无")}, 聚合方法: {"平均值" if agg_method == "mean" else "中位数"})',
+            height=1000,
             width=1000,
             showlegend=True,
             legend=dict(
@@ -59,36 +148,16 @@ class DataPlotter:
         )
 
         # 设置 Y 轴标题
-        fig.update_yaxes(title_text="CO2_dry (ppm)", row=1, col=1)
-        fig.update_yaxes(title_text="CH4_dry (ppm)", row=2, col=1)
-        fig.update_yaxes(title_text="H2O (ppm)", row=3, col=1)  # 添加 H2O Y轴标题
+        if data_source == 'picarro':
+            fig.update_yaxes(title_text="CH4_dry (ppm)", row=1, col=1)  # CH4 在第一行
+            fig.update_yaxes(title_text="CO2_dry (ppm)", row=2, col=1)  # CO2 在第二行
+            fig.update_yaxes(title_text="H2O (ppm)", row=3, col=1)
+        else:  # pico
+            fig.update_yaxes(title_text="CH4 (ppm)", row=1, col=1)
+            fig.update_yaxes(title_text="C2H6 (ppb)", row=2, col=1)
+            fig.update_yaxes(title_text="H2O (ppm)", row=3, col=1)
+        
         fig.update_xaxes(title_text="时间", row=3, col=1)
-
-        # 根据数据自动设置 Y 轴范围，或使用用户指定的范围
-        if 'CO2_dry' in plot_df.columns and plot_df['CO2_dry'].notna().any():
-            if co2_range is not None and co2_range != (0.0, 1000.0):
-                fig.update_yaxes(range=co2_range, row=1, col=1)
-            else:
-                co2_min, co2_max = float(plot_df['CO2_dry'].min()), float(plot_df['CO2_dry'].max())
-                margin = (co2_max - co2_min) * 0.05 if co2_max != co2_min else 50
-                fig.update_yaxes(range=[co2_min - margin, co2_max + margin], row=1, col=1)
-
-        if 'CH4_dry' in plot_df.columns and plot_df['CH4_dry'].notna().any():
-            if ch4_range is not None and ch4_range != (0.0, 10.0):
-                fig.update_yaxes(range=ch4_range, row=2, col=1)
-            else:
-                ch4_min, ch4_max = float(plot_df['CH4_dry'].min()), float(plot_df['CH4_dry'].max())
-                margin = (ch4_max - ch4_min) * 0.05 if ch4_max != ch4_min else 0.1
-                fig.update_yaxes(range=[ch4_min - margin, ch4_max + margin], row=2, col=1)
-
-        # 添加 H2O Y轴范围设置
-        if 'H2O' in plot_df.columns and plot_df['H2O'].notna().any():
-            if h2o_range is not None and h2o_range != (0.0, 100.0):
-                fig.update_yaxes(range=h2o_range, row=3, col=1)
-            else:
-                h2o_min, h2o_max = float(plot_df['H2O'].min()), float(plot_df['H2O'].max())
-                margin = (h2o_max - h2o_min) * 0.05 if h2o_max != h2o_min else 1.0
-                fig.update_yaxes(range=[h2o_min - margin, h2o_max + margin], row=3, col=1)
 
         return fig
     
@@ -165,7 +234,7 @@ class DataPlotter:
                 x=df['DATETIME_DISPLAY'],
                 y=df[gas_col],
                 mode='lines+markers',
-                name=f'{gas_col} (ppm)',
+                name=f'{gas_col}',
                 line=dict(color=color, width=1),
                 marker=dict(size=3),
             ), row=row, col=1)
@@ -224,6 +293,7 @@ class DataPlotter:
         color_map = {
             'blue': '0,0,255',
             'red': '255,0,0',
-            'green': '0,255,0'  # 添加绿色用于 H2O
+            'green': '0,255,0',
+            'orange': '255,165,0'  # 添加橙色用于 C2H6
         }
         return color_map.get(color, '0,0,0')
