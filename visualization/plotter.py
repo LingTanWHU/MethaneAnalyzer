@@ -1,6 +1,8 @@
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
+from datetime import datetime, time, timedelta
+import pytz
 from typing import Optional, Tuple
 
 class DataPlotter:
@@ -14,7 +16,7 @@ class DataPlotter:
         """创建CO2、CH4和H2O的子图"""
         fig = make_subplots(
             rows=3, cols=1,  # 改为3行
-            # subplot_titles=("CO₂ 干基浓度 (ppm)", "CH₄ 干基浓度 (ppm)", "H₂O 浓度 (ppm)"),  # 添加标题
+            subplot_titles=("CO₂ 干基浓度 (ppm)", "CH₄ 干基浓度 (ppm)", "H₂O 浓度 (ppm)"),  # 添加 H2O 标题
             shared_xaxes=True,
             vertical_spacing=0.08
         )
@@ -34,6 +36,11 @@ class DataPlotter:
 
         # 绘制 H2O 子图
         self._add_gas_trace(fig, plot_df, 'H2O', 'green', 3, time_window)  # 添加 H2O
+
+        # 添加每天的垂直线
+        self._add_vertical_lines(fig, plot_df, 1)  # CO2 子图
+        self._add_vertical_lines(fig, plot_df, 2)  # CH4 子图
+        self._add_vertical_lines(fig, plot_df, 3)  # H2O 子图
 
         # 更新布局
         fig.update_layout(
@@ -84,6 +91,70 @@ class DataPlotter:
                 fig.update_yaxes(range=[h2o_min - margin, h2o_max + margin], row=3, col=1)
 
         return fig
+    
+    def _add_vertical_lines(self, fig: go.Figure, df: pd.DataFrame, row: int):
+        """添加每天的垂直线 (0点为实线, 6点、12点、18点为虚线)"""
+        if 'DATETIME_DISPLAY' not in df.columns or df.empty:
+            return
+        
+        # 获取时间范围
+        start_time = df['DATETIME_DISPLAY'].min()
+        end_time = df['DATETIME_DISPLAY'].max()
+        
+        if pd.isna(start_time) or pd.isna(end_time):
+            return
+        
+        # 生成垂直线的时间点
+        zero_lines = []  # 0点的实线
+        other_lines = []  # 6点、12点、18点的虚线
+        
+        # 从开始日期的0点开始
+        current_date = start_time.date()
+        end_date = end_time.date()
+        
+        while current_date <= end_date:
+            # 检查0点
+            zero_time = pd.Timestamp(datetime.combine(current_date, time(0, 0)))
+            # 如果原数据有时区信息，为新创建的时间也添加相同的时区
+            if start_time.tzinfo is not None:
+                zero_time = zero_time.tz_localize(start_time.tzinfo)
+            
+            if start_time <= zero_time <= end_time:
+                zero_lines.append(zero_time)
+            
+            # 检查6点、12点、18点
+            for hour in [6, 12, 18]:
+                other_time = pd.Timestamp(datetime.combine(current_date, time(hour, 0)))
+                # 如果原数据有时区信息，为新创建的时间也添加相同的时区
+                if start_time.tzinfo is not None:
+                    other_time = other_time.tz_localize(start_time.tzinfo)
+                
+                if start_time <= other_time <= end_time:
+                    other_lines.append(other_time)
+            
+            current_date += timedelta(days=1)
+        
+        # 添加0点的实线
+        for line_time in zero_lines:
+            fig.add_vline(
+                x=line_time,
+                line_dash="solid",  # 实线
+                line_color="gray",
+                line_width=2,  # 稍微粗一些
+                opacity=0.8,
+                row=row
+            )
+        
+        # 添加6点、12点、18点的虚线
+        for line_time in other_lines:
+            fig.add_vline(
+                x=line_time,
+                line_dash="dash",  # 虚线
+                line_color="gray",
+                line_width=1,
+                opacity=0.5,
+                row=row
+            )
     
     def _add_gas_trace(self, fig: go.Figure, df: pd.DataFrame, gas_col: str, 
                       color: str, row: int, time_window: str):

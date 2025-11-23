@@ -10,7 +10,7 @@ class DataResampler:
     def __init__(self):
         self.numeric_columns = ['CO2_dry', 'CH4_dry', 'H2O']
     
-    def filter_zero_values(self, df: pd.DataFrame) -> pd.DataFrame:  # 移除阈值参数
+    def filter_zero_values(self, df: pd.DataFrame) -> pd.DataFrame:
         """过滤掉CO2、CH4和H2O的零值"""
         if df.empty:
             return df
@@ -48,26 +48,36 @@ class DataResampler:
         # 重采样对象
         resampled = df_numeric.resample(time_window)
         
-        # 根据聚合方法选择函数
+        # 根据聚合方法选择函数 - 优化聚合方式
         if agg_method == 'mean':
-            df_resampled = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
-            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+            # 使用更高效的聚合方法
+            df_resampled = resampled.agg(['mean', 'std'])
+            # 分离均值和标准差
+            mean_cols = [col for col in df_resampled.columns if col[1] == 'mean']
+            std_cols = [col for col in df_resampled.columns if col[1] == 'std']
+            
+            df_mean = df_resampled[mean_cols]
+            df_std = df_resampled[std_cols]
+            
+            # 重命名列
+            df_mean.columns = [col[0] for col in mean_cols]
+            df_std.columns = [col[0] for col in std_cols]
         elif agg_method == 'median':
-            df_resampled = resampled.apply(lambda x: x.median() if len(x.dropna()) > 0 else np.nan)
-            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+            df_mean = resampled.median()
+            df_std = resampled.std()
         else:
-            df_resampled = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
-            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+            df_mean = resampled.mean()
+            df_std = resampled.std()
         
         # 将时间列从索引中恢复
-        df_resampled = df_resampled.reset_index()
+        df_mean = df_mean.reset_index()
         df_std = df_std.reset_index()
         
-        return df_resampled, df_std
+        return df_mean, df_std
     
     def process_data(self, df: pd.DataFrame, time_window: Optional[str], 
                     agg_method: str, display_tz: pytz.timezone, 
-                    filter_zeros: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:  # 移除阈值参数
+                    filter_zeros: bool = True) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """完整的数据处理流程"""
         original_count = len(df)
         
@@ -79,7 +89,7 @@ class DataResampler:
         
         # 应用零值过滤
         if filter_zeros and any(col in df.columns for col in ['CO2_dry', 'CH4_dry', 'H2O']):
-            df = self.filter_zero_values(df)  # 移除阈值参数
+            df = self.filter_zero_values(df)
             filtered_count = len(df)
             st.info(f"数据过滤: {original_count} -> {filtered_count} 条记录")
         else:
