@@ -1,4 +1,11 @@
+# gitignore文件
+
+# 环境变量
 .env
 
 # 备份
 /backup/
+
+# 缓存
+__pycache__/
+*.pyc

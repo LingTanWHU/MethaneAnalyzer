@@ -12,7 +12,8 @@ from utils.helpers import setup_sidebar, setup_page_config
 
 @st.cache_data(ttl=300)  # 缓存5分钟
 def load_and_process_data(data_source, start_datetime, end_datetime, 
-                         timezone_str, time_window, agg_method, filter_non_positive):
+                         timezone_str, time_window, agg_method, filter_non_positive,
+                         picarro_concentration_type=None):
     """缓存数据加载和处理过程"""
     # 将时区字符串转换为时区对象
     selected_timezone = pytz.timezone(timezone_str)
@@ -74,15 +75,20 @@ def main():
     
     # 使用缓存加载数据 - 传入数据源类型而不是路径
     with st.spinner("正在加载和处理数据..."):
-        processed_df, std_df = load_and_process_data(
-            config['data_source'],  # 传入数据源类型
-            config['start_datetime'],
-            config['end_datetime'],
-            config['selected_timezone'].zone,  # 传入时区字符串
-            config['selected_time_window'],
-            config['selected_agg_method'],
-            config['filter_non_positive']  # 修改参数名
-        )
+        load_kwargs = {
+            'data_source': config['data_source'],
+            'start_datetime': config['start_datetime'],
+            'end_datetime': config['end_datetime'],
+            'timezone_str': config['selected_timezone'].zone,
+            'time_window': config['selected_time_window'],
+            'agg_method': config['selected_agg_method'],
+            'filter_non_positive': config['filter_non_positive']
+        }
+        
+        if config['data_source'] == 'picarro':
+            load_kwargs['picarro_concentration_type'] = config['picarro_concentration_type']
+        
+        processed_df, std_df = load_and_process_data(**load_kwargs)
     
     if processed_df.empty:
         st.warning("处理后没有有效数据")
@@ -99,7 +105,8 @@ def main():
         ch4_range=config['ch4_range'],
         h2o_range=config['h2o_range'],
         c2h6_range=config.get('c2h6_range', None),
-        data_source=config['data_source']  # 传入数据源类型
+        data_source=config['data_source'],  # 传入数据源类型
+        picarro_concentration_type=config.get('picarro_concentration_type', 'dry')  # 传入浓度类型
     )
     
     # 显示数据预览
@@ -109,7 +116,8 @@ def main():
     # 绘制图表
     # 检查是否包含气体数据
     if config['data_source'] == 'picarro':
-        has_gas_data = any(col in processed_df.columns for col in ['CO2_dry', 'CH4_dry', 'H2O'])
+        gas_cols = ['CH4_dry', 'CO2_dry', 'H2O'] if config['picarro_concentration_type'] == 'dry' else ['CH4', 'CO2', 'H2O']
+        has_gas_data = any(col in processed_df.columns for col in gas_cols)
     else:  # pico
         has_gas_data = any(col in processed_df.columns for col in ['CH4', 'C2H6', 'H2O'])
     
@@ -121,7 +129,8 @@ def main():
         
         # 创建多列显示统计信息
         if config['data_source'] == 'picarro':
-            gas_cols = [col for col in ['CO2_dry', 'CH4_dry', 'H2O'] if col in processed_df.columns]
+            gas_cols = ['CH4_dry', 'CO2_dry', 'H2O'] if config['picarro_concentration_type'] == 'dry' else ['CH4', 'CO2', 'H2O']
+            gas_cols = [col for col in gas_cols if col in processed_df.columns]
         else:  # pico
             gas_cols = [col for col in ['CH4', 'C2H6', 'H2O'] if col in processed_df.columns]
         

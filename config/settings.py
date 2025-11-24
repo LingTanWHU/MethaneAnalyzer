@@ -45,3 +45,9 @@ DATA_SOURCE_OPTIONS = {
     "Picarro": "picarro",
     "Pico": "pico"
 }
+
+# Picarro 数据显示选项
+PICARRO_CONCENTRATION_OPTIONS = {
+    "干基浓度": "dry",
+    "原浓度": "raw"
+}

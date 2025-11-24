@@ -4,7 +4,7 @@ import glob  # 添加这个导入
 import pytz
 from datetime import datetime, time, timedelta, date
 from config.settings import (
-    TIME_WINDOW_OPTIONS, AGG_METHOD_OPTIONS, TIMEZONE_OPTIONS, DATA_SOURCE_OPTIONS,
+    TIME_WINDOW_OPTIONS, AGG_METHOD_OPTIONS, TIMEZONE_OPTIONS, DATA_SOURCE_OPTIONS, PICARRO_CONCENTRATION_OPTIONS,
     DEFAULT_TIME_WINDOW_INDEX, DEFAULT_AGG_METHOD_INDEX, DEFAULT_TIMEZONE_INDEX,
     AppConfig
 )
@@ -153,6 +153,14 @@ def setup_sidebar():
     if data_source == 'picarro':
         data_root_path = config.PICARRO_DATA_ROOT_PATH
         st.sidebar.info(f"数据根路径: {data_root_path}")
+        
+        # Picarro 浓度类型选择
+        concentration_key = st.sidebar.selectbox(
+            "Picarro 浓度类型",
+            options=list(PICARRO_CONCENTRATION_OPTIONS.keys()),
+            index=0  # 默认为干基浓度
+        )
+        picarro_concentration_type = PICARRO_CONCENTRATION_OPTIONS[concentration_key]
         
         # 扫描并显示 Picarro 可用数据日期
         if os.path.exists(data_root_path):
@@ -329,7 +337,9 @@ def setup_sidebar():
         'h2o_range': h2o_range
     }
     
-    if data_source == 'pico':
+    if data_source == 'picarro':
+        config_dict['picarro_concentration_type'] = picarro_concentration_type
+    elif data_source == 'pico':
         config_dict['c2h6_range'] = c2h6_range
     
     return config_dict

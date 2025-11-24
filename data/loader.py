@@ -15,7 +15,7 @@ class DataLoader:
     def __init__(self, data_source: str = 'picarro'):
         if data_source == 'picarro':
             self.data_root_path = os.getenv('PICARRO_DATA_ROOT_PATH', r'Y:\公共空间\Data 数据 结果\监测仪数据\DataLog_User')
-            self.numeric_columns = ['CO2_dry', 'CH4_dry', 'H2O']
+            self.numeric_columns = ['CO2_dry', 'CH4_dry', 'H2O', 'CO2', 'CH4']  # 添加原始浓度列
             self.data_type = 'picarro'
         elif data_source == 'pico':
             self.data_root_path = os.getenv('PICO_DATA_ROOT_PATH', r'Y:\公共空间\Data 数据 结果\监测仪数据\MIRA_Data')
@@ -60,8 +60,8 @@ class DataLoader:
             
             df = pd.DataFrame(data_lines, columns=headers)
             
-            # 转换数值列
-            for col in ['CO2_dry', 'CH4_dry', 'H2O']:
+            # 转换数值列 - 包括干基和原始浓度
+            for col in ['CO2_dry', 'CH4_dry', 'H2O', 'CO2', 'CH4']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
             
@@ -131,19 +131,21 @@ class DataLoader:
         data_files = []
         
         if self.data_type == 'picarro':
-            # Picarro 数据的文件结构 - 需要根据用户时区来确定需要加载的文件
-            # 用户设置的是 UTC+8 时间，我们需要考虑时区转换对日期的影响
+            # Picarro 数据的文件结构 - 需要考虑时区转换导致的日期边界问题
+            # 将用户指定的时间范围转换为UTC时间，以匹配数据文件中的日期
+            # 考虑到时区转换可能导致日期变化，需要扩展搜索范围
             
-            # 将用户设置的开始和结束时间转换为UTC时间，以确定需要搜索的日期范围
-            start_date_tz = timezone.localize(start_date)
-            end_date_tz = timezone.localize(end_date)
+            # 将用户时间转换为指定时区
+            start_date_tz = timezone.localize(datetime.combine(start_date.date(), datetime.min.time()))
+            end_date_tz = timezone.localize(datetime.combine(end_date.date(), datetime.max.time()))
             
-            start_utc = start_date_tz.astimezone(pytz.UTC)
-            end_utc = end_date_tz.astimezone(pytz.UTC)
+            # 转换为UTC时间
+            start_date_utc = start_date_tz.astimezone(pytz.UTC)
+            end_date_utc = end_date_tz.astimezone(pytz.UTC)
             
             # 计算需要搜索的日期范围（考虑时区转换可能跨越的日期）
-            search_start_date = start_utc.date() - timedelta(days=1)  # 向前扩展一天
-            search_end_date = end_utc.date() + timedelta(days=1)      # 向后扩展一天
+            search_start_date = start_date_utc.date() - timedelta(days=1)  # 向前扩展一天
+            search_end_date = end_date_utc.date() + timedelta(days=1)      # 向后扩展一天
             
             # 遍历年份文件夹
             years = []
@@ -197,13 +199,9 @@ class DataLoader:
         
         elif self.data_type == 'pico':
             # Pico 数据的文件结构 - 需要考虑跨天问题
-            # 将用户时间转换为UTC+8时间，然后扩展搜索范围
-            start_date_shanghai = start_date.astimezone(pytz.timezone('Asia/Shanghai'))
-            end_date_shanghai = end_date.astimezone(pytz.timezone('Asia/Shanghai'))
-            
             # 扩展搜索范围：开始日期前一天到结束日期后一天
-            search_start_date = start_date_shanghai.date() - timedelta(days=1)
-            search_end_date = end_date_shanghai.date() + timedelta(days=1)
+            search_start_date = start_date.date() - timedelta(days=1)
+            search_end_date = end_date.date() + timedelta(days=1)
             
             # 查找所有匹配的 .txt 文件，但排除不需要的文件
             all_txt_files = glob.glob(os.path.join(self.data_root_path, "*.txt"))
