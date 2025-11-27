@@ -1,15 +1,17 @@
 import os
 from dataclasses import dataclass
 from typing import Optional
+from dotenv import load_dotenv
+
+# 加载项目根目录下的 .env 文件
+load_dotenv()
 
 @dataclass
 class AppConfig:
     """应用配置"""
-    picarro_data_root_path: str = r'Y:\公共空间\Data 数据 结果\监测仪数据\DataLog_User'
-    pico_data_root_path: str = r'Y:\公共空间\Data 数据 结果\监测仪数据\MIRA_Data'
-    # 从环境变量获取路径，如果不存在则使用默认值
-    PICARRO_DATA_ROOT_PATH: str = os.getenv('PICARRO_DATA_ROOT_PATH', picarro_data_root_path)
-    PICO_DATA_ROOT_PATH: str = os.getenv('PICO_DATA_ROOT_PATH', pico_data_root_path)
+    # 从环境变量获取路径
+    PICARRO_DATA_ROOT_PATH: str = os.getenv('PICARRO_DATA_ROOT_PATH')
+    PICO_DATA_ROOT_PATH: str = os.getenv('PICO_DATA_ROOT_PATH')
 
 # 时间窗口选项 - 使用新格式
 TIME_WINDOW_OPTIONS = {

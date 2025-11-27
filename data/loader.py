@@ -14,11 +14,11 @@ class DataLoader:
     
     def __init__(self, data_source: str = 'picarro'):
         if data_source == 'picarro':
-            self.data_root_path = os.getenv('PICARRO_DATA_ROOT_PATH', r'Y:\公共空间\Data 数据 结果\监测仪数据\DataLog_User')
+            self.data_root_path = os.getenv('PICARRO_DATA_ROOT_PATH', r'D:\Users\why\Documents\DataLog_User')
             self.numeric_columns = ['CO2_dry', 'CH4_dry', 'H2O', 'CO2', 'CH4']  # 添加原始浓度列
             self.data_type = 'picarro'
         elif data_source == 'pico':
-            self.data_root_path = os.getenv('PICO_DATA_ROOT_PATH', r'Y:\公共空间\Data 数据 结果\监测仪数据\MIRA_Data')
+            self.data_root_path = os.getenv('PICO_DATA_ROOT_PATH', r'D:\Users\why\Documents\MIRA_Data')
             self.numeric_columns = ['CH4', 'C2H6', 'H2O']  # Pico 数据列
             self.data_type = 'pico'
         else:
