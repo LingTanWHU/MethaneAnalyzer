@@ -253,9 +253,9 @@ def setup_sidebar():
         st.sidebar.error("起始时间不能晚于终止时间")
         return None
 
-    # 数据过滤设置 - 过滤非正数，默认开启
+    # 数据过滤设置 - 过滤零值，默认开启
     st.sidebar.header("数据过滤设置")
-    filter_non_positive = st.sidebar.checkbox("过滤非正数 (≤ 0)", value=True)  # 默认开启
+    filter_zero_values = st.sidebar.checkbox("过滤零值", value=True)  # 默认开启
 
     # 时间平均设置
     st.sidebar.header("时间平均设置")
@@ -327,7 +327,7 @@ def setup_sidebar():
         'data_root_path': data_root_path,
         'start_datetime': start_datetime,
         'end_datetime': end_datetime,
-        'filter_non_positive': filter_non_positive,  # 修改参数名
+        'filter_zero_values': filter_zero_values,  # 修改参数名
         'selected_timezone': selected_timezone,
         'selected_time_window_key': selected_time_window_key,
         'selected_time_window': selected_time_window,

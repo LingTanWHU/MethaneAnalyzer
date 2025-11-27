@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import datetime
 import pytz
+import pandas as pd
 from config.settings import (
     TIME_WINDOW_OPTIONS, AGG_METHOD_OPTIONS, TIMEZONE_OPTIONS,
     DEFAULT_TIME_WINDOW_INDEX, DEFAULT_AGG_METHOD_INDEX, DEFAULT_TIMEZONE_INDEX
@@ -12,7 +13,7 @@ from utils.helpers import setup_sidebar, setup_page_config
 
 @st.cache_data(ttl=300)  # 缓存5分钟
 def load_and_process_data(data_source, start_datetime, end_datetime, 
-                         timezone_str, time_window, agg_method, filter_non_positive,
+                         timezone_str, time_window, agg_method, filter_zero_values,
                          picarro_concentration_type=None):
     """缓存数据加载和处理过程"""
     # 将时区字符串转换为时区对象
@@ -47,7 +48,7 @@ def load_and_process_data(data_source, start_datetime, end_datetime,
         time_window=time_window,
         agg_method=agg_method,
         display_tz=selected_timezone,
-        filter_non_positive=filter_non_positive,
+        filter_zero_values=filter_zero_values,
         data_source=data_source  # 传入数据源类型
     )
     
@@ -82,7 +83,7 @@ def main():
             'timezone_str': config['selected_timezone'].zone,
             'time_window': config['selected_time_window'],
             'agg_method': config['selected_agg_method'],
-            'filter_non_positive': config['filter_non_positive']
+            'filter_zero_values': config['filter_zero_values']
         }
         
         if config['data_source'] == 'picarro':

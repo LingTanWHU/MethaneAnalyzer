@@ -11,26 +11,26 @@ class DataResampler:
         # 根据数据源动态设置列名
         pass
     
-    def filter_non_positive_values(self, df: pd.DataFrame, data_source: str = 'picarro') -> pd.DataFrame:
-        """过滤掉气体的非正数（<= 0）"""
+    def filter_zero_values(self, df: pd.DataFrame, data_source: str = 'picarro') -> pd.DataFrame:
+        """过滤掉气体的零值（= 0）"""
         if df.empty:
             return df
         
         condition = True
         if data_source == 'picarro':
             if 'CO2_dry' in df.columns:
-                condition = condition & (df['CO2_dry'] > 0)
+                condition = condition & (df['CO2_dry'] != 0)
             if 'CH4_dry' in df.columns:
-                condition = condition & (df['CH4_dry'] > 0)
+                condition = condition & (df['CH4_dry'] != 0)
             if 'H2O' in df.columns:
-                condition = condition & (df['H2O'] > 0)
+                condition = condition & (df['H2O'] != 0)
         else:  # pico
             if 'CH4' in df.columns:
-                condition = condition & (df['CH4'] > 0)
+                condition = condition & (df['CH4'] != 0)
             if 'C2H6' in df.columns:
-                condition = condition & (df['C2H6'] > 0)
+                condition = condition & (df['C2H6'] != 0)
             if 'H2O' in df.columns:
-                condition = condition & (df['H2O'] > 0)
+                condition = condition & (df['H2O'] != 0)
         
         return df[condition].copy()
     
@@ -83,7 +83,7 @@ class DataResampler:
     
     def process_data(self, df: pd.DataFrame, time_window: Optional[str], 
                     agg_method: str, display_tz: pytz.timezone, 
-                    filter_non_positive: bool = True, data_source: str = 'picarro') -> Tuple[pd.DataFrame, pd.DataFrame]:
+                    filter_zero_values: bool = True, data_source: str = 'picarro') -> Tuple[pd.DataFrame, pd.DataFrame]:
         """完整的数据处理流程"""
         original_count = len(df)
         
@@ -94,11 +94,11 @@ class DataResampler:
         else:
             df['DATETIME_DISPLAY'] = df.index
         
-        # 应用非正数过滤
-        if filter_non_positive:
-            df = self.filter_non_positive_values(df, data_source)
+        # 应用零值过滤
+        if filter_zero_values:
+            df = self.filter_zero_values(df, data_source)
             filtered_count = len(df)
-            st.info(f"数据过滤 (非正数): {original_count} -> {filtered_count} 条记录")
+            st.info(f"数据过滤 (零值): {original_count} -> {filtered_count} 条记录")
         else:
             st.info(f"原始数据记录数: {original_count}")
         
