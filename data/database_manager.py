@@ -171,21 +171,18 @@ class DatabaseManager:
         df_filtered.to_sql(table_name, conn, if_exists='append', index=False)
         conn.close()
     
-    def query_processed_data_from_db(self, data_type: str, start_time: str, end_time: str, 
-                                   time_window: str, agg_method: str) -> pd.DataFrame:
+    def query_processed_data_from_db(self, data_type: str, start_time: str, end_time: str) -> pd.DataFrame:
         """从数据库查询预处理数据"""
         conn = sqlite3.connect(self.db_path)
         
         table_name = f"{data_type}_processed_data"
         query = f'''
             SELECT * FROM {table_name} 
-            WHERE DATETIME BETWEEN ? AND ? 
-            AND time_window = ? 
-            AND agg_method = ?
+            WHERE DATETIME BETWEEN ? AND ?
             ORDER BY DATETIME
         '''
         
-        df = pd.read_sql_query(query, conn, params=(start_time, end_time, time_window, agg_method))
+        df = pd.read_sql_query(query, conn, params=(start_time, end_time))
         conn.close()
         
         if not df.empty and 'DATETIME' in df.columns:

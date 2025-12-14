@@ -218,12 +218,35 @@ class DataLoader:
         print(f"同步完成！共处理 {total_records} 条预处理记录")
     
     def _process_file_data_with_std(self, df: pd.DataFrame, time_window: str, agg_method: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """处理单个文件的数据，进行时间平均和标准差计算"""
+        """处理单个文件的数据，进行时间平均和标准差计算，并过滤掉2024年之前的数据"""
         if df.empty or 'DATETIME' not in df.columns:
             return pd.DataFrame(), pd.DataFrame()
         
-        # 设置时间列为索引进行重采样
-        df_with_index = df.set_index('DATETIME')
+        # === 新增：时间合理性筛查（只保留 2024-01-01 及之后的数据）===
+        df = df.copy()
+        
+        # 确保 DATETIME 是 datetime 类型（处理可能的 string）
+        df['DATETIME'] = pd.to_datetime(df['DATETIME'], errors='coerce')
+        
+        # 定义最小有效时间（2024年1月1日 UTC）
+        min_valid_time = pd.Timestamp('2024-01-01', tz='UTC')
+        
+        # 如果 DATETIME 没有时区信息，假设为 UTC（你的加载逻辑已处理时区，此步为保险）
+        if df['DATETIME'].dt.tz is None:
+            df['DATETIME'] = df['DATETIME'].dt.tz_localize('UTC')
+        else:
+            df['DATETIME'] = df['DATETIME'].dt.tz_convert('UTC')
+        
+        # 过滤：保留 >= 2024-01-01 的数据
+        valid_mask = df['DATETIME'] >= min_valid_time
+        df_valid = df[valid_mask].copy()
+        
+        if df_valid.empty:
+            print("  -> 警告：文件中无 2024 年及之后的有效数据，跳过处理")
+            return pd.DataFrame(), pd.DataFrame()
+        
+        # === 后续逻辑使用 df_valid ===
+        df_with_index = df_valid.set_index('DATETIME')
         
         # 选择需要聚合的数值列
         numeric_cols = df_with_index.select_dtypes(include=[np.number]).columns.tolist()
@@ -237,24 +260,42 @@ class DataLoader:
         # 将旧的时间频率别名转换为新格式
         corrected_time_window = time_window.replace('T', 'min')
         
-        # 重采样对象
+        # 重采样
         resampled = df_numeric.resample(corrected_time_window)
         
-        # 根据聚合方法选择函数
+        # 聚合方法
+        def agg_func(x, method='mean'):
+            valid_x = x.dropna()
+            if len(valid_x) == 0:
+                return np.nan
+            if method == 'mean':
+                return valid_x.mean()
+            elif method == 'median':
+                return valid_x.median()
+            else:
+                return valid_x.mean()
+
+        # 专门的标准差函数
+        def std_func(x):
+            valid_x = x.dropna()
+            if len(valid_x) < 2:
+                return np.nan
+            return valid_x.std(ddof=1)  # 样本标准差
+
         if agg_method == 'mean':
-            df_avg = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
-            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+            df_avg = resampled.apply(lambda x: agg_func(x, 'mean'))
+            df_std = resampled.apply(std_func)  # ← 修复：用 std_func 替代 agg_func('std')
         elif agg_method == 'median':
-            df_avg = resampled.apply(lambda x: x.median() if len(x.dropna()) > 0 else np.nan)
-            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+            df_avg = resampled.apply(lambda x: agg_func(x, 'median'))
+            df_std = resampled.apply(std_func)  # ← 修复：用 std_func 替代 agg_func('std')
         else:
-            df_avg = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
-            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
-        
-        # 将时间列从索引中恢复
+            df_avg = resampled.apply(lambda x: agg_func(x, 'mean'))
+            df_std = resampled.apply(std_func)  # ← 修复：用 std_func 替代 agg_func('std')
+
+        # 恢复时间列为普通列
         df_avg = df_avg.reset_index()
         df_std = df_std.reset_index()
-        
+
         return df_avg, df_std
     
     def load_processed_data(self, start_datetime: datetime, end_datetime: datetime, 
@@ -271,12 +312,12 @@ class DataLoader:
             # 如果是1分钟数据，直接从数据库获取
             if time_window == '1min':
                 df = self.db_manager.query_processed_data_from_db(
-                    self.data_type, start_utc_str, end_utc_str, '1min', agg_method)
+                    self.data_type, start_utc_str, end_utc_str)
                 print(f"从预处理数据表获取 {len(df)} 条记录")
             else:
                 # 如果是其他时间窗口，先获取1分钟数据，然后重采样
                 df_1min = self.db_manager.query_processed_data_from_db(
-                    self.data_type, start_utc_str, end_utc_str, '1min', agg_method)
+                    self.data_type, start_utc_str, end_utc_str)
                 
                 if df_1min.empty:
                     print("没有1分钟数据用于重采样")
