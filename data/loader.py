@@ -157,63 +157,61 @@ class DataLoader:
     def sync_database(self, time_window: str = '1min', agg_method: str = 'mean'):
         """
         同步数据库与文件系统 - 生成并存储1分钟平均数据和标准差
+        使用文件名（而非路径）作为唯一标识
         """
         print(f"开始同步{self.data_type}数据并生成{time_window}平均数据...")
         
-        # 获取所有数据文件
         all_files = self.get_all_data_files()
         print(f"找到 {len(all_files)} 个数据文件")
         
-        # 获取数据库中已有的文件记录
+        # 获取数据库中已有的文件记录（key 为文件名）
         existing_records = self.db_manager.get_existing_file_records()
         print(f"数据库中已有 {len(existing_records)} 个文件记录")
         
-        files_to_process = []
+        files_to_process = []  # (file_name, file_path, file_hash)
         
         for file_path in all_files:
+            file_name = os.path.basename(file_path)
             file_hash = self.db_manager.calculate_file_hash(file_path)
             file_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
             
-            if file_path in existing_records:
-                # 文件已存在，检查是否有更新
-                existing_hash = existing_records[file_path]['hash']
-                existing_modified = datetime.fromisoformat(existing_records[file_path]['modified'])
-                
+            if file_name in existing_records:
+                existing_hash = existing_records[file_name]['hash']
+                existing_modified = datetime.fromisoformat(existing_records[file_name]['modified'])
                 if file_hash != existing_hash or file_modified > existing_modified:
-                    print(f"文件已更改: {file_path}")
-                    files_to_process.append((file_path, file_hash))
+                    print(f"文件已更改: {file_name}")
+                    files_to_process.append((file_name, file_path, file_hash))
                 else:
-                    print(f"文件未更改，跳过: {file_path}")
+                    print(f"文件未更改，跳过: {file_name}")
             else:
-                # 新文件
-                print(f"新文件: {file_path}")
-                files_to_process.append((file_path, file_hash))
+                print(f"新文件: {file_name}")
+                files_to_process.append((file_name, file_path, file_hash))
         
         print(f"需要处理 {len(files_to_process)} 个文件")
         
-        # 先删除已有的预处理数据
-        self.db_manager.delete_old_processed_data_by_time_window(self.data_type, time_window, agg_method)
-        
         # 处理需要更新的文件
         total_records = 0
-        for file_path, file_hash in files_to_process:
-            print(f"处理文件: {file_path}")
+        for file_name, file_path, file_hash in files_to_process:
+            print(f"处理文件: {file_name}")
+            
+            # 删除该文件名对应的旧预处理数据
+            self.db_manager.delete_processed_data_by_file_name(file_name, self.data_type, time_window, agg_method)
             
             # 加载数据
             df = self._load_picarro_file(file_path) if self.data_type == 'picarro' else self._load_pico_file(file_path)
             
             if df is not None and not df.empty:
-                # 进行时间平均和标准差处理
                 df_avg, df_std = self._process_file_data_with_std(df, time_window, agg_method)
-                
                 if not df_avg.empty:
-                    # 插入预处理数据（平均值和标准差）
-                    self.db_manager.insert_processed_data_to_db(df_avg, df_std, self.data_type, time_window, agg_method)
+                    # 插入时传入 file_name
+                    self.db_manager.insert_processed_data_to_db(
+                        df_avg, df_std, self.data_type, time_window, agg_method, source_file_name=file_name
+                    )
                     total_records += len(df_avg)
-                    print(f"已处理并存储: {file_path} ({len(df_avg)} 条记录)")
+                    print(f"已处理并存储: {file_name} ({len(df_avg)} 条记录)")
                     
-                    # 更新文件记录
-                    self.db_manager.update_file_record(file_path, file_hash, self.data_type, len(df_avg))
+                    # 更新文件记录（传入 file_name 和原始路径）
+                    self.db_manager.update_file_record(file_name, file_path, file_hash, self.data_type, len(df_avg))
             else:
                 print(f"警告: 无法加载文件 {file_path}")
         

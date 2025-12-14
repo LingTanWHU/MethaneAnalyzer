@@ -140,22 +140,7 @@ def display_data_availability(available_dates: set):
 def setup_sidebar():
     """设置侧边栏并返回配置"""
     config = AppConfig()
-
-    # 在侧边栏添加数据库同步选项
-    with st.sidebar:
-        st.header("数据库管理")
-        
-        if st.button("同步Picarro数据"):
-            with st.spinner("正在同步Picarro数据（1min平均）..."):
-                update_database_manually('picarro', '1min', 'mean')
-            st.success("Picarro数据同步完成！")
-        
-        if st.button("同步Pico数据"):
-            with st.spinner("正在同步Pico数据（1min平均）..."):
-                update_database_manually('pico', '1min', 'mean')
-            st.success("Pico数据同步完成！")
-        
-
+    
     st.sidebar.header("数据选择")
     
     # 数据源切换
@@ -288,6 +273,20 @@ def setup_sidebar():
     selected_agg_method_key = "平均值"
     selected_agg_method = "mean"
 
+    # 在侧边栏添加数据库同步选项
+    with st.sidebar:
+        st.header("数据库管理")
+        
+        if st.button("同步Picarro数据"):
+            with st.spinner("正在同步Picarro数据（1min平均）..."):
+                update_database_manually('picarro', '1min', 'mean')
+            st.success("Picarro数据同步完成！")
+        
+        if st.button("同步Pico数据"):
+            with st.spinner("正在同步Pico数据（1min平均）..."):
+                update_database_manually('pico', '1min', 'mean')
+            st.success("Pico数据同步完成！")
+            
     # 图形设置
     st.sidebar.header("图形设置")
     # CO2

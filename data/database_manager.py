@@ -12,54 +12,71 @@ class DatabaseManager:
         self.db_path = db_path
         self.init_database()
     
+    # 在 init_database 中，修改表结构
     def init_database(self):
-        """初始化数据库表结构"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # 预处理数据表 - 存储平均值
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS picarro_processed_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                DATETIME TEXT,
-                CO2_dry REAL,
-                CH4_dry REAL,
-                H2O REAL,
-                CO2 REAL,
-                CH4 REAL,
-                CO2_dry_std REAL,
-                CH4_dry_std REAL,
-                H2O_std REAL,
-                CO2_std REAL,
-                CH4_std REAL,
-                time_window TEXT,
-                agg_method TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # 修改预处理数据表：添加 source_file_name
+        for data_type in ['picarro', 'pico']:
+            table_name = f"{data_type}_processed_data"
+            # 先创建表（如果不存在）
+            if data_type == 'picarro':
+                cols = """
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    DATETIME TEXT,
+                    CO2_dry REAL,
+                    CH4_dry REAL,
+                    H2O REAL,
+                    CO2 REAL,
+                    CH4 REAL,
+                    CO2_dry_std REAL,
+                    CH4_dry_std REAL,
+                    H2O_std REAL,
+                    CO2_std REAL,
+                    CH4_std REAL,
+                    time_window TEXT,
+                    agg_method TEXT,
+                    source_file_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                """
+            else:
+                cols = """
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    DATETIME TEXT,
+                    CH4 REAL,
+                    C2H6 REAL,
+                    H2O REAL,
+                    Tgas REAL,
+                    CH4_std REAL,
+                    C2H6_std REAL,
+                    H2O_std REAL,
+                    Tgas_std REAL,
+                    time_window TEXT,
+                    agg_method TEXT,
+                    source_file_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                """
+            
+            cursor.execute(f'CREATE TABLE IF NOT EXISTS {table_name} ({cols})')
+            
+            # 添加索引（如果 source_file_name 列不存在，则添加）
+            try:
+                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN source_file_name TEXT")
+            except sqlite3.OperationalError:
+                # 列已存在
+                pass
+            
+            # 创建索引
+            cursor.execute(f'CREATE INDEX IF NOT EXISTS idx_{data_type}_proc_file ON {table_name}(source_file_name)')
+            cursor.execute(f'CREATE INDEX IF NOT EXISTS idx_{data_type}_proc_datetime ON {table_name}(DATETIME)')
+            cursor.execute(f'CREATE INDEX IF NOT EXISTS idx_{data_type}_proc_time_window ON {table_name}(time_window, agg_method)')
         
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS pico_processed_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                DATETIME TEXT,
-                CH4 REAL,
-                C2H6 REAL,
-                H2O REAL,
-                Tgas REAL,
-                CH4_std REAL,
-                C2H6_std REAL,
-                H2O_std REAL,
-                Tgas_std REAL,
-                time_window TEXT,
-                agg_method TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # 文件记录表，跟踪每个文件的状态
+        # 修改 file_records 表：主键改为 file_name
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS file_records (
-                file_path TEXT PRIMARY KEY,
+                file_name TEXT PRIMARY KEY,
+                original_path TEXT,  -- 保留原始路径用于日志（可选）
                 file_hash TEXT,
                 last_modified TIMESTAMP,
                 data_type TEXT,
@@ -68,12 +85,6 @@ class DatabaseManager:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
-        # 为时间字段创建索引
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_picarro_proc_datetime ON picarro_processed_data(DATETIME)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pico_proc_datetime ON pico_processed_data(DATETIME)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_picarro_proc_time_window ON picarro_processed_data(time_window, agg_method)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pico_proc_time_window ON pico_processed_data(time_window, agg_method)')
         
         conn.commit()
         conn.close()
@@ -87,79 +98,76 @@ class DatabaseManager:
         return hash_md5.hexdigest()
     
     def get_existing_file_records(self) -> dict:
-        """获取数据库中已有的文件记录"""
+        """获取数据库中已有的文件记录，key 为文件名"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT file_path, file_hash, last_modified FROM file_records")
+        cursor.execute("SELECT file_name, file_hash, last_modified FROM file_records")
         records = {row[0]: {'hash': row[1], 'modified': row[2]} for row in cursor.fetchall()}
         conn.close()
         return records
     
-    def delete_old_processed_data_by_time_window(self, data_type: str, time_window: str, agg_method: str):
-        """删除指定时间窗口和聚合方法的预处理数据"""
+
+    def delete_processed_data_by_file_name(self, file_name: str, data_type: str, time_window: str, agg_method: str):
+        """删除指定文件名的预处理数据"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
         table_name = f"{data_type}_processed_data"
-        cursor.execute(f"DELETE FROM {table_name} WHERE time_window = ? AND agg_method = ?", (time_window, agg_method))
+        cursor.execute(f'''
+            DELETE FROM {table_name}
+            WHERE source_file_name = ? AND time_window = ? AND agg_method = ?
+        ''', (file_name, time_window, agg_method))
         conn.commit()
         conn.close()
-    
-    def update_file_record(self, file_path: str, file_hash: str, data_type: str, record_count: int):
-        """更新文件记录"""
+
+    def update_file_record(self, file_name: str, original_path: str, file_hash: str, data_type: str, record_count: int):
+        """更新文件记录（按文件名）"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        modified_time = datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat()
+        modified_time = datetime.fromtimestamp(os.path.getmtime(original_path)).isoformat()
         
         cursor.execute('''
             INSERT OR REPLACE INTO file_records 
-            (file_path, file_hash, last_modified, data_type, record_count, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (file_path, file_hash, modified_time, data_type, record_count))
+            (file_name, original_path, file_hash, last_modified, data_type, record_count, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (file_name, original_path, file_hash, modified_time, data_type, record_count))
         
         conn.commit()
         conn.close()
     
-    def insert_processed_data_to_db(self, df: pd.DataFrame, df_std: pd.DataFrame, data_type: str, time_window: str, agg_method: str):
-        """将预处理后的数据（平均值和标准差）插入数据库"""
+    def insert_processed_data_to_db(self, df: pd.DataFrame, df_std: pd.DataFrame, 
+                                data_type: str, time_window: str, agg_method: str,
+                                source_file_name: str):
+        """将预处理后的数据插入数据库，并标记来源文件名"""
         conn = sqlite3.connect(self.db_path)
         
-        # 创建包含平均值和标准差的完整DataFrame
         df_complete = df.copy()
         
-        # 为标准差数据添加_std后缀
+        # 添加标准差列
         if not df_std.empty:
             for col in df_std.columns:
                 if col != 'DATETIME' and col in df.columns:
                     std_col_name = f"{col}_std"
                     df_complete[std_col_name] = df_std[col]
         
-        # 只保留数据库表中定义的列（排除id和时间戳列）
+        # 选择列
         if data_type == 'picarro':
             required_columns = ['DATETIME', 'CO2_dry', 'CH4_dry', 'H2O', 'CO2', 'CH4', 
-                              'CO2_dry_std', 'CH4_dry_std', 'H2O_std', 'CO2_std', 'CH4_std']
-        elif data_type == 'pico':
+                            'CO2_dry_std', 'CH4_dry_std', 'H2O_std', 'CO2_std', 'CH4_std']
+        else:
             required_columns = ['DATETIME', 'CH4', 'C2H6', 'H2O', 'Tgas',
-                              'CH4_std', 'C2H6_std', 'H2O_std', 'Tgas_std']
+                            'CH4_std', 'C2H6_std', 'H2O_std', 'Tgas_std']
         
-        # 筛选出存在的列
         available_columns = [col for col in required_columns if col in df_complete.columns]
-        
         if not available_columns:
             conn.close()
             return
         
-        # 创建只包含需要列的DataFrame
         df_filtered = df_complete[available_columns].copy()
-        
-        # 添加时间窗口和聚合方法
         df_filtered['time_window'] = time_window
         df_filtered['agg_method'] = agg_method
+        df_filtered['source_file_name'] = source_file_name  # ← 关键新增
         
         table_name = f"{data_type}_processed_data"
-        
-        # 插入数据
         df_filtered.to_sql(table_name, conn, if_exists='append', index=False)
         conn.close()
     
