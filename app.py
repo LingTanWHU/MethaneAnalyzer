@@ -11,7 +11,7 @@ from processing.resampler import DataResampler
 from visualization.plotter import DataPlotter
 from utils.helpers import setup_sidebar, setup_page_config
 
-@st.cache_data(ttl=300)  # 缓存5分钟
+
 def load_and_process_data(data_source, start_datetime, end_datetime, 
                          timezone_str, time_window, agg_method, filter_zero_values,
                          picarro_concentration_type=None):
@@ -19,42 +19,32 @@ def load_and_process_data(data_source, start_datetime, end_datetime,
     # 将时区字符串转换为时区对象
     selected_timezone = pytz.timezone(timezone_str)
     
-    # 数据加载
-    data_loader = DataLoader(data_source)
-    all_files = data_loader.get_filtered_files(
-        start_date=start_datetime,
-        end_date=end_datetime,
-        timezone=selected_timezone
-    )
+    # 数据加载 - 直接从预处理数据表获取
+    data_loader = DataLoader(data_source, use_db=True)
     
-    if not all_files:
-        return pd.DataFrame(), pd.DataFrame()
-    
-    # 加载所有数据文件 - 传入时间范围和时区进行数据筛选
-    combined_df = data_loader.load_all_files(
-        all_files,
+    processed_df, std_df = data_loader.load_processed_data(
         start_datetime=start_datetime,
         end_datetime=end_datetime,
-        user_timezone=selected_timezone
-    )
-    
-    if combined_df.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    
-    # 数据处理
-    resampler = DataResampler()
-    processed_df, std_df = resampler.process_data(
-        df=combined_df,
+        user_timezone=selected_timezone,
         time_window=time_window,
-        agg_method=agg_method,
-        display_tz=selected_timezone,
-        filter_zero_values=filter_zero_values,
-        data_source=data_source  # 传入数据源类型
+        agg_method=agg_method
     )
+    
+    if processed_df.empty:
+        st.warning("没有找到预处理数据，请先同步数据")
+        return pd.DataFrame(), pd.DataFrame()
     
     # 对 Picarro 的 H2O 数据进行单位转换：乘以 1e4 (从 % 转换为 ppm)
     if data_source == 'picarro' and 'H2O' in processed_df.columns:
         processed_df['H2O'] = processed_df['H2O'] * 1e4
+        # 同时转换标准差
+        if 'H2O_std' in std_df.columns:
+            std_df['H2O'] = std_df['H2O'] * 1e4
+    
+    # 应用零值过滤（如果需要）
+    if filter_zero_values:
+        resampler = DataResampler()
+        processed_df = resampler.filter_zero_values(processed_df, data_source)
     
     return processed_df, std_df
 
@@ -66,6 +56,7 @@ def main():
     # 显示标题
     st.title("气体监测仪数据浏览器")
     st.markdown("---")
+
     
     # 设置侧边栏
     config = setup_sidebar()
@@ -75,7 +66,7 @@ def main():
         return
     
     # 使用缓存加载数据 - 传入数据源类型而不是路径
-    with st.spinner("正在加载和处理数据..."):
+    with st.spinner("正在加载数据..."):
         load_kwargs = {
             'data_source': config['data_source'],
             'start_datetime': config['start_datetime'],
@@ -92,7 +83,7 @@ def main():
         processed_df, std_df = load_and_process_data(**load_kwargs)
     
     if processed_df.empty:
-        st.warning("处理后没有有效数据")
+        st.warning("处理后没有有效数据，请检查时间范围或同步数据")
         return
     
     # 数据可视化
@@ -110,9 +101,6 @@ def main():
         picarro_concentration_type=config.get('picarro_concentration_type', 'dry')  # 传入浓度类型
     )
     
-    # 显示数据预览
-    st.subheader("数据预览")
-    st.dataframe(processed_df.head(10))
     
     # 绘制图表
     # 检查是否包含气体数据
@@ -150,6 +138,28 @@ def main():
     else:
         st.warning("数据中不包含气体浓度列")
         st.write("可用列:", list(processed_df.columns))
+
+        # 显示数据预览
+    st.subheader("数据预览")
+    if not processed_df.empty:
+        # 重新排列列，将DATETIME_DISPLAY放在最前面，不显示DATETIME列
+        display_cols = []
+        
+        # 添加时间显示列
+        if 'DATETIME_DISPLAY' in processed_df.columns:
+            display_cols.append('DATETIME_DISPLAY')
+        
+        # 添加其他所有列（除了DATETIME列）
+        other_cols = [col for col in processed_df.columns if col != 'DATETIME' and col != 'DATETIME_DISPLAY']
+        display_cols.extend(other_cols)
+        
+        # 选择显示的列
+        display_df = processed_df[display_cols].copy()
+        
+        # 显示前10行
+        st.dataframe(display_df.head(10))
+    else:
+        st.write("没有数据可显示")
 
 if __name__ == "__main__":
     main()

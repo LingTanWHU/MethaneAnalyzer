@@ -4,15 +4,15 @@ import os
 import glob
 from datetime import datetime, timedelta
 import pytz
-from typing import List, Optional
-import streamlit as st
+from typing import List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing as mp
+from .database_manager import DatabaseManager
 
 class DataLoader:
-    """数据加载器"""
+    """数据加载器 - 存储1分钟平均数据和标准差，支持重采样"""
     
-    def __init__(self, data_source: str = 'picarro'):
+    def __init__(self, data_source: str = 'picarro', use_db: bool = True):
         if data_source == 'picarro':
             self.data_root_path = os.getenv('PICARRO_DATA_ROOT_PATH', r'D:\Users\why\Documents\DataLog_User')
             self.numeric_columns = ['CO2_dry', 'CH4_dry', 'H2O', 'CO2', 'CH4']  # 添加原始浓度列
@@ -26,6 +26,11 @@ class DataLoader:
         
         # 使用 CPU 核心数的一半作为线程池大小
         self.max_workers = max(1, mp.cpu_count() // 2)
+        
+        # 数据库相关
+        self.use_db = use_db
+        if use_db:
+            self.db_manager = DatabaseManager()
     
     def _load_picarro_file(self, file_path: str) -> Optional[pd.DataFrame]:
         """加载 Picarro .dat 文件"""
@@ -117,161 +122,246 @@ class DataLoader:
         except Exception as e:
             return None
     
-    def _load_single_file(self, file_path: str) -> Optional[pd.DataFrame]:
-        """根据数据类型加载单个文件"""
+    def get_all_data_files(self) -> List[str]:
+        """获取所有数据文件路径"""
         if self.data_type == 'picarro':
-            return self._load_picarro_file(file_path)
-        elif self.data_type == 'pico':
-            return self._load_pico_file(file_path)
-        else:
-            return None
-    
-    def get_filtered_files(self, start_date: datetime, end_date: datetime, timezone: pytz.timezone) -> List[str]:
-        """根据起始和终止日期筛选获取数据文件路径"""
-        data_files = []
-        
-        if self.data_type == 'picarro':
-            # Picarro 数据的文件结构 - 需要考虑时区转换导致的日期边界问题
-            # 将用户指定的时间范围转换为UTC时间，以匹配数据文件中的日期
-            # 考虑到时区转换可能导致日期变化，需要扩展搜索范围
-            
-            # 将用户时间转换为指定时区
-            start_date_tz = timezone.localize(datetime.combine(start_date.date(), datetime.min.time()))
-            end_date_tz = timezone.localize(datetime.combine(end_date.date(), datetime.max.time()))
-            
-            # 转换为UTC时间
-            start_date_utc = start_date_tz.astimezone(pytz.UTC)
-            end_date_utc = end_date_tz.astimezone(pytz.UTC)
-            
-            # 计算需要搜索的日期范围（考虑时区转换可能跨越的日期）
-            search_start_date = start_date_utc.date() - timedelta(days=1)  # 向前扩展一天
-            search_end_date = end_date_utc.date() + timedelta(days=1)      # 向后扩展一天
-            
-            # 遍历年份文件夹
+            data_files = []
             years = []
             for item in os.listdir(self.data_root_path):
                 item_path = os.path.join(self.data_root_path, item)
                 if os.path.isdir(item_path) and item.isdigit():
-                    year = int(item)
-                    if search_start_date.year <= year <= search_end_date.year:
-                        years.append(year)
+                    years.append(int(item))
             
             for year in sorted(years):
                 year_folder = str(year).zfill(4)
                 year_path = os.path.join(self.data_root_path, year_folder)
                 
-                # 遍历月份文件夹
-                months = []
-                start_month = search_start_date.month if year == search_start_date.year else 1
-                end_month = search_end_date.month if year == search_end_date.year else 12
-                
-                for item in os.listdir(year_path):
-                    item_path = os.path.join(year_path, item)
-                    if os.path.isdir(item_path) and item.isdigit():
-                        month = int(item)
-                        if start_month <= month <= end_month:
-                            months.append(month)
-                
-                for month in sorted(months):
-                    month_folder = str(month).zfill(2)
-                    month_path = os.path.join(year_path, month_folder)
-                    
-                    # 遍历日期文件夹
-                    days = []
-                    start_day = search_start_date.day if year == search_start_date.year and month == search_start_date.month else 1
-                    end_day = search_end_date.day if year == search_end_date.year and month == search_end_date.month else 31
-                    
-                    for item in os.listdir(month_path):
-                        item_path = os.path.join(month_path, item)
-                        if os.path.isdir(item_path) and item.isdigit():
-                            day = int(item)
-                            if start_day <= day <= end_day:
-                                days.append(day)
-                    
-                    for day in sorted(days):
-                        day_folder = str(day).zfill(2)
-                        day_path = os.path.join(month_path, day_folder)
-                        
-                        # 查找.dat文件
-                        dat_files = glob.glob(os.path.join(day_path, "*.dat"))
-                        for dat_file in dat_files:
-                            data_files.append(dat_file)
+                for root, dirs, files in os.walk(year_path):
+                    for file in files:
+                        if file.endswith('.dat'):
+                            data_files.append(os.path.join(root, file))
+            
+            return sorted(data_files)
         
         elif self.data_type == 'pico':
-            # Pico 数据的文件结构 - 需要考虑跨天问题
-            # 扩展搜索范围：开始日期前一天到结束日期后一天
-            search_start_date = start_date.date() - timedelta(days=1)
-            search_end_date = end_date.date() + timedelta(days=1)
-            
-            # 查找所有匹配的 .txt 文件，但排除不需要的文件
             all_txt_files = glob.glob(os.path.join(self.data_root_path, "*.txt"))
-            
+            filtered_files = []
             for txt_file in all_txt_files:
                 filename = os.path.basename(txt_file)
-                # 排除不需要的文件
-                if ('Eng.txt' in filename or 
-                    'spectralite.txt' in filename or 
-                    'config.txt' in filename):
-                    continue
-                
-                # 检查文件名是否符合 Pico 数据格式: Pico101244_251106_185816.txt
-                if filename.startswith('Pico') and filename.endswith('.txt'):
-                    try:
-                        # 从文件名提取时间信息: Pico101244_251106_185816.txt
-                        # 提取日期部分: 251106 -> 2025-11-06
-                        name_part = filename.replace('Pico', '').replace('.txt', '')
-                        if '_' in name_part:
-                            date_part = name_part.split('_')[1]  # 251106
-                            year = int('20' + date_part[:2])
-                            month = int(date_part[2:4])
-                            day = int(date_part[4:6])
-                            
-                            file_date = datetime(year, month, day).date()
-                            
-                            # 检查文件日期是否在扩展的搜索范围内
-                            if search_start_date <= file_date <= search_end_date:
-                                data_files.append(txt_file)
-                    except:
-                        # 如果解析失败，跳过这个文件
-                        continue
-        
-        return sorted(data_files)
+                if not ('Eng.txt' in filename or 
+                       'spectralite.txt' in filename or 
+                       'config.txt' in filename) and filename.startswith('Pico'):
+                    filtered_files.append(txt_file)
+            return sorted(filtered_files)
     
-    def load_all_files(self, file_paths: List[str], start_datetime: datetime = None, 
-                      end_datetime: datetime = None, user_timezone: pytz.timezone = None) -> pd.DataFrame:
-        """使用多线程加载所有符合条件的文件并合并，同时进行时间筛选"""
-        if not file_paths:
-            return pd.DataFrame()
+    def sync_database(self, time_window: str = '1min', agg_method: str = 'mean'):
+        """
+        同步数据库与文件系统 - 生成并存储1分钟平均数据和标准差
+        """
+        print(f"开始同步{self.data_type}数据并生成{time_window}平均数据...")
         
-        all_data = []
+        # 获取所有数据文件
+        all_files = self.get_all_data_files()
+        print(f"找到 {len(all_files)} 个数据文件")
         
-        # 将用户指定的时间范围转换为UTC时间以匹配数据
-        start_utc = None
-        end_utc = None
+        # 获取数据库中已有的文件记录
+        existing_records = self.db_manager.get_existing_file_records()
+        print(f"数据库中已有 {len(existing_records)} 个文件记录")
+        
+        files_to_process = []
+        
+        for file_path in all_files:
+            file_hash = self.db_manager.calculate_file_hash(file_path)
+            file_modified = datetime.fromtimestamp(os.path.getmtime(file_path))
+            
+            if file_path in existing_records:
+                # 文件已存在，检查是否有更新
+                existing_hash = existing_records[file_path]['hash']
+                existing_modified = datetime.fromisoformat(existing_records[file_path]['modified'])
+                
+                if file_hash != existing_hash or file_modified > existing_modified:
+                    print(f"文件已更改: {file_path}")
+                    files_to_process.append((file_path, file_hash))
+                else:
+                    print(f"文件未更改，跳过: {file_path}")
+            else:
+                # 新文件
+                print(f"新文件: {file_path}")
+                files_to_process.append((file_path, file_hash))
+        
+        print(f"需要处理 {len(files_to_process)} 个文件")
+        
+        # 先删除已有的预处理数据
+        self.db_manager.delete_old_processed_data_by_time_window(self.data_type, time_window, agg_method)
+        
+        # 处理需要更新的文件
+        total_records = 0
+        for file_path, file_hash in files_to_process:
+            print(f"处理文件: {file_path}")
+            
+            # 加载数据
+            df = self._load_picarro_file(file_path) if self.data_type == 'picarro' else self._load_pico_file(file_path)
+            
+            if df is not None and not df.empty:
+                # 进行时间平均和标准差处理
+                df_avg, df_std = self._process_file_data_with_std(df, time_window, agg_method)
+                
+                if not df_avg.empty:
+                    # 插入预处理数据（平均值和标准差）
+                    self.db_manager.insert_processed_data_to_db(df_avg, df_std, self.data_type, time_window, agg_method)
+                    total_records += len(df_avg)
+                    print(f"已处理并存储: {file_path} ({len(df_avg)} 条记录)")
+                    
+                    # 更新文件记录
+                    self.db_manager.update_file_record(file_path, file_hash, self.data_type, len(df_avg))
+            else:
+                print(f"警告: 无法加载文件 {file_path}")
+        
+        print(f"同步完成！共处理 {total_records} 条预处理记录")
+    
+    def _process_file_data_with_std(self, df: pd.DataFrame, time_window: str, agg_method: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """处理单个文件的数据，进行时间平均和标准差计算"""
+        if df.empty or 'DATETIME' not in df.columns:
+            return pd.DataFrame(), pd.DataFrame()
+        
+        # 设置时间列为索引进行重采样
+        df_with_index = df.set_index('DATETIME')
+        
+        # 选择需要聚合的数值列
+        numeric_cols = df_with_index.select_dtypes(include=[np.number]).columns.tolist()
+        
+        if not numeric_cols:
+            return pd.DataFrame(), pd.DataFrame()
+        
+        # 只对数值列进行聚合
+        df_numeric = df_with_index[numeric_cols]
+        
+        # 将旧的时间频率别名转换为新格式
+        corrected_time_window = time_window.replace('T', 'min')
+        
+        # 重采样对象
+        resampled = df_numeric.resample(corrected_time_window)
+        
+        # 根据聚合方法选择函数
+        if agg_method == 'mean':
+            df_avg = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+        elif agg_method == 'median':
+            df_avg = resampled.apply(lambda x: x.median() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+        else:
+            df_avg = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+        
+        # 将时间列从索引中恢复
+        df_avg = df_avg.reset_index()
+        df_std = df_std.reset_index()
+        
+        return df_avg, df_std
+    
+    def load_processed_data(self, start_datetime: datetime, end_datetime: datetime, 
+                           user_timezone: pytz.timezone, time_window: str, agg_method: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """从数据库加载预处理数据并根据需要进行重采样，返回平均值和标准差"""
         if start_datetime is not None and end_datetime is not None and user_timezone:
+            # 将用户选择的时区时间转换为UTC时间用于数据库查询
             start_utc = user_timezone.localize(start_datetime).astimezone(pytz.UTC)
             end_utc = user_timezone.localize(end_datetime).astimezone(pytz.UTC)
-        
-        # 使用线程池并行加载文件
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 提交所有文件加载任务
-            future_to_file = {executor.submit(self._load_single_file, file_path): file_path 
-                             for file_path in file_paths}
             
-            # 收集结果
-            loaded_data = []
-            for future in as_completed(future_to_file):
-                df = future.result()
-                if df is not None and not df.empty:
-                    # 如果指定了时间范围，则进行时间筛选
-                    if start_utc is not None and end_utc is not None:
-                        if 'DATETIME' in df.columns:
-                            df = df[(df['DATETIME'] >= start_utc) & (df['DATETIME'] <= end_utc)]
-                    
-                    if not df.empty:
-                        loaded_data.append(df)
+            start_utc_str = start_utc.strftime('%Y-%m-%d %H:%M:%S')
+            end_utc_str = end_utc.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # 如果是1分钟数据，直接从数据库获取
+            if time_window == '1min':
+                df = self.db_manager.query_processed_data_from_db(
+                    self.data_type, start_utc_str, end_utc_str, '1min', agg_method)
+                print(f"从预处理数据表获取 {len(df)} 条记录")
+            else:
+                # 如果是其他时间窗口，先获取1分钟数据，然后重采样
+                df_1min = self.db_manager.query_processed_data_from_db(
+                    self.data_type, start_utc_str, end_utc_str, '1min', agg_method)
+                
+                if df_1min.empty:
+                    print("没有1分钟数据用于重采样")
+                    return pd.DataFrame(), pd.DataFrame()
+                
+                print(f"从预处理数据表获取 {len(df_1min)} 条1分钟记录，准备重采样到 {time_window}")
+                
+                # 重采样到指定时间窗口
+                df_avg, df_std = self._resample_data_with_std(df_1min, time_window, agg_method)
+                # 合并平均值和标准差数据
+                df = df_avg.copy()
+                for col in df_std.columns:
+                    if col != 'DATETIME':
+                        std_col_name = f"{col}_std"
+                        df[std_col_name] = df_std[col]
+            
+            if not df.empty and 'DATETIME' in df.columns:
+                # 添加 DATETIME_DISPLAY 列用于显示（转换为用户选择的时区）
+                df['DATETIME_DISPLAY'] = pd.to_datetime(df['DATETIME']).dt.tz_convert(user_timezone)
+            
+            # 分离平均值和标准差数据
+            if not df.empty:
+                avg_cols = [col for col in df.columns if not col.endswith('_std')]
+                std_cols = [col for col in df.columns if col.endswith('_std')]
+                
+                df_avg = df[avg_cols].copy()
+                
+                # 创建标准差DataFrame
+                df_std = df[['DATETIME_DISPLAY']].copy()
+                for std_col in std_cols:
+                    avg_col = std_col.replace('_std', '')
+                    df_std[avg_col] = df[std_col]
+            else:
+                df_avg = pd.DataFrame()
+                df_std = pd.DataFrame()
+            
+            return df_avg, df_std
+        else:
+            return pd.DataFrame(), pd.DataFrame()
+    
+    def _resample_data_with_std(self, df: pd.DataFrame, time_window: str, agg_method: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """对已有的数据进行重采样，同时计算平均值和标准差"""
+        if df.empty or 'DATETIME' not in df.columns:
+            return pd.DataFrame(), pd.DataFrame()
         
-        if not loaded_data:
-            return pd.DataFrame()
+        # 设置时间列为索引进行重采样
+        df_with_index = df.set_index('DATETIME')
         
-        return pd.concat(loaded_data, ignore_index=True)
+        # 选择需要聚合的数值列（排除DATETIME_DISPLAY列和_std列）
+        numeric_cols = [col for col in df_with_index.columns if col not in ['DATETIME_DISPLAY'] and not col.endswith('_std')]
+        numeric_cols = [col for col in numeric_cols if pd.api.types.is_numeric_dtype(df_with_index[col])]
+        
+        if not numeric_cols:
+            return pd.DataFrame(), pd.DataFrame()
+        
+        # 只对数值列进行聚合
+        df_numeric = df_with_index[numeric_cols]
+        
+        # 将旧的时间频率别名转换为新格式
+        corrected_time_window = time_window.replace('T', 'min')
+        
+        # 重采样对象
+        resampled = df_numeric.resample(corrected_time_window)
+        
+        # 根据聚合方法选择函数
+        if agg_method == 'mean':
+            df_avg = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+        elif agg_method == 'median':
+            df_avg = resampled.apply(lambda x: x.median() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+        else:
+            df_avg = resampled.apply(lambda x: x.mean() if len(x.dropna()) > 0 else np.nan)
+            df_std = resampled.apply(lambda x: x.std() if len(x.dropna()) > 0 else np.nan)
+        
+        # 将时间列从索引中恢复
+        df_avg = df_avg.reset_index()
+        df_std = df_std.reset_index()
+        
+        return df_avg, df_std
+
+# 导出同步函数
+def update_database_manually(data_source: str = 'picarro', time_window: str = '1min', agg_method: str = 'mean'):
+    """手动更新数据库"""
+    loader = DataLoader(data_source=data_source, use_db=True)
+    loader.sync_database(time_window, agg_method)

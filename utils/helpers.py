@@ -8,6 +8,7 @@ from config.settings import (
     DEFAULT_TIME_WINDOW_INDEX, DEFAULT_AGG_METHOD_INDEX, DEFAULT_TIMEZONE_INDEX,
     AppConfig
 )
+from data.loader import DataLoader, update_database_manually
 
 def setup_page_config():
     """设置页面配置"""
@@ -139,7 +140,22 @@ def display_data_availability(available_dates: set):
 def setup_sidebar():
     """设置侧边栏并返回配置"""
     config = AppConfig()
-    
+
+    # 在侧边栏添加数据库同步选项
+    with st.sidebar:
+        st.header("数据库管理")
+        
+        if st.button("同步Picarro数据"):
+            with st.spinner("正在同步Picarro数据（1min平均）..."):
+                update_database_manually('picarro', '1min', 'mean')
+            st.success("Picarro数据同步完成！")
+        
+        if st.button("同步Pico数据"):
+            with st.spinner("正在同步Pico数据（1min平均）..."):
+                update_database_manually('pico', '1min', 'mean')
+            st.success("Pico数据同步完成！")
+        
+
     st.sidebar.header("数据选择")
     
     # 数据源切换
@@ -198,20 +214,13 @@ def setup_sidebar():
         else:
             latest_data_date = datetime.now().date() - timedelta(days=1)
     
-    # 时区设置 - 移到时间设置之前
-    st.sidebar.header("时区设置")
-    selected_tz_key = st.sidebar.selectbox(
-        "选择显示时区",
-        options=list(TIMEZONE_OPTIONS.keys()),
-        index=DEFAULT_TIMEZONE_INDEX
-    )
-    selected_timezone = pytz.timezone(TIMEZONE_OPTIONS[selected_tz_key])
-    
+   
     # 时间范围设置 - 使用日期时间选择器
     st.sidebar.header("时间范围设置")
     
-    # 默认为最近有数据的那一天
-    default_start_date = latest_data_date
+    # 默认结束日期为最近有数据的那一天
+    # 默认起始日期为最近有数据的前两天
+    default_start_date = latest_data_date - timedelta(days=2)
     default_start_time = time(0, 0)
     default_end_date = latest_data_date
     default_end_time = time(23, 59)
@@ -253,6 +262,15 @@ def setup_sidebar():
         st.sidebar.error("起始时间不能晚于终止时间")
         return None
 
+    # 时区设置
+    st.sidebar.header("时区设置")
+    selected_tz_key = st.sidebar.selectbox(
+        "选择显示时区",
+        options=list(TIMEZONE_OPTIONS.keys()),
+        index=DEFAULT_TIMEZONE_INDEX
+    )
+    selected_timezone = pytz.timezone(TIMEZONE_OPTIONS[selected_tz_key])
+
     # 数据过滤设置 - 过滤零值，默认开启
     st.sidebar.header("数据过滤设置")
     filter_zero_values = st.sidebar.checkbox("过滤零值", value=True)  # 默认开启
@@ -267,13 +285,8 @@ def setup_sidebar():
     selected_time_window = TIME_WINDOW_OPTIONS[selected_time_window_key]
     
     # 聚合方法选择
-    selected_agg_method_key = st.sidebar.radio(
-        "选择聚合方法",
-        options=list(AGG_METHOD_OPTIONS.keys()),
-        format_func=lambda x: x,
-        index=DEFAULT_AGG_METHOD_INDEX
-    )
-    selected_agg_method = AGG_METHOD_OPTIONS[selected_agg_method_key]
+    selected_agg_method_key = "平均值"
+    selected_agg_method = "mean"
 
     # 图形设置
     st.sidebar.header("图形设置")

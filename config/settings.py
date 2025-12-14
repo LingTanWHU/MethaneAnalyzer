@@ -15,16 +15,14 @@ class AppConfig:
 
 # 时间窗口选项 - 使用新格式
 TIME_WINDOW_OPTIONS = {
-    "原始 (无平均)": None,
-    "30秒平均": "30S",
     "1分钟平均": "1min", 
     "5分钟平均": "5min",
-    "10分钟平均": "10min",
     "30分钟平均": "30min",
-    "1小时平均": "1H",
+    "1小时平均": "1h",
+    "1天平均": "1D"
 }
 
-DEFAULT_TIME_WINDOW_INDEX = 2  # 默认为5分钟平均
+DEFAULT_TIME_WINDOW_INDEX = 3  # 默认为1小时平均
 DEFAULT_AGG_METHOD_INDEX = 0   # 默认为平均值
 DEFAULT_TIMEZONE_INDEX = 0     # 默认为UTC+8
 
